@@ -1,6 +1,8 @@
 import asyncio
 from typing import List, Tuple
 import bittensor as bt
+from redis import Redis
+
 
 async def sync_miners(n: int):
     indices = bt.torch.topk(metagraph.incentive, n).indices
@@ -12,8 +14,8 @@ async def sync_miners(n: int):
     axons: List[Tuple[bt.axon, int]] = [
         (metagraph.axons[uid], uid) for uid in uids_with_highest_incentives
     ]
-    for axon, uid in axons:
-        print(axon.ip, axon.port, metagraph.incentive[uid].item())
+    ips = [f"http://{axon.ip}:{axon.port}" for (axon, _) in axons]
+    r.hset('miners', mapping={'list': ips})
     await asyncio.sleep(50 * 12)
 
 
@@ -24,5 +26,6 @@ if __name__ == "__main__":
     wallet = bt.wallet(name="targon")
 
     dendrite = bt.dendrite(wallet=wallet)
+    r = Redis(host='cache', port=6379, decode_responses=True)
     while True:
         asyncio.run(sync_miners(10))
