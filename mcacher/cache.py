@@ -2,6 +2,7 @@ import asyncio
 from typing import List, Tuple
 import bittensor as bt
 from redis import Redis
+from redis.commands.json.path import Path
 
 
 async def sync_miners(n: int):
@@ -15,17 +16,13 @@ async def sync_miners(n: int):
         (metagraph.axons[uid], uid) for uid in uids_with_highest_incentives
     ]
     ips = [f"http://{axon.ip}:{axon.port}" for (axon, _) in axons]
-    r.hset('miners', mapping={'list': ips})
+    r.json().set("miners", obj=ips, path=Path.root_path())
     await asyncio.sleep(50 * 12)
 
 
 if __name__ == "__main__":
     subtensor = bt.subtensor("ws://subtensor.sybil.com:9944")
     metagraph: bt.metagraph = subtensor.metagraph(netuid=4)
-
-    wallet = bt.wallet(name="targon")
-
-    dendrite = bt.dendrite(wallet=wallet)
-    r = Redis(host='cache', port=6379, decode_responses=True)
+    r = Redis(host="cache", port=6379, decode_responses=True)
     while True:
         asyncio.run(sync_miners(10))

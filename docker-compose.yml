@@ -1,20 +1,30 @@
 version: '3'
 services:
-  miner-cache:
-    build: ./
+  searcher:
+    ports:
+      - '80:80'
+    build:
+      context: ./searcher
+    restart: always
+    depends_on:
+      cache:
+        condition: service_healthy
+  mcacher:
+    build:
+      context: ./mcacher
     restart: always
     depends_on:
       cache:
         condition: service_healthy
 
   cache:
-    image: redis:6.2-alpine
+    image: redis/redis-stack-server:latest
     restart: always
     ports:
       - '6379:6379'
-    command: redis-server --save 20 1 --loglevel warning
     healthcheck:
       test: [ "CMD", "redis-cli", "--raw", "incr", "ping" ]
+      interval: "3s"
     volumes: 
       - cache:/data
 
