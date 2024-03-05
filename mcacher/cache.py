@@ -12,10 +12,14 @@ async def sync_miners(n: int):
     uids_with_highest_incentives: List[int] = metagraph.uids[indices].tolist()
 
     # get the axon of the uids
-    axons: List[Tuple[bt.axon, int]] = [
+    axons: List[Tuple[bt.AxonInfo, int]] = [
         (metagraph.axons[uid], uid) for uid in uids_with_highest_incentives
     ]
-    ips = [f"http://{axon.ip}:{axon.port}" for (axon, _) in axons]
+    axons = [(metagraph.axons[42], 42)]  # TODO
+    ips = [
+        {"ip": axon.ip, "port": axon.port, "hotkey": axon.hotkey} for (axon, _) in axons
+    ]
+    print("Saving new miners to cache", flush=True)
     r.json().set("miners", obj=ips, path=Path.root_path())
     await asyncio.sleep(50 * 12)
 

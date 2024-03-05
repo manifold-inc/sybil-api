@@ -1,0 +1,16 @@
+{
+  "bt_header_dendrite_version": "670",
+  "bt_header_dendrite_nonce": "8862080416",
+  "bt_header_dendrite_uuid": "74f4bf96-da48-11ee-bfb2-8e9cf16bcd69",
+  "bt_header_dendrite_signature": "0x7c5ec02bc8cda8aec3cb3951cf5d79b0b089e1cce188f65cd894f794e10fcf295f32862ba59d4d9bbaf5a6668cef9b56ebec4ac2c6b294d6207191eec4caa18b",
+  "bt_header_input_obj_sources": "W10=",
+  "total_size": "5947",
+}
+bt_header_dendrite_uuid 999999999999999
+bt_header_input_obj_sources W10=
+bt_header_dendrite_nonce 8606873583
+bt_header_dendrite_signature 0xf09445db7110a66e70045ea69f640bcb6cda2fa456d066fb13756c648833a96a41f7de5bfc72d63e5211b562225513e88b86b15290502c9a6be801bba52dec86
+Content-Type application/json
+bt_header_dendrite_version c353171d-d9d3-461c-8da7-c8429cfd3a78
+bt_header_dendrite_hotkey 5D7thQ8XUCLMm58BxF75PTvMsyGbLC93T61RACqTmKLt49A7
+total_size 111

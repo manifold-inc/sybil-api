@@ -1,6 +1,7 @@
 version: '3'
 services:
   searcher:
+    env_file: .env
     ports:
       - '80:80'
     build:
