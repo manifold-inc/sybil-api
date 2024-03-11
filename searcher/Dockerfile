@@ -11,9 +11,11 @@ RUN go mod download
 
 COPY . .
 
-RUN GOOS=linux GOARCH=amd64 go build -ldflags="-w -s" -o server .
+#RUN GOOS=linux GOARCH=amd64 go build -ldflags="-w -s" -o server .
+CMD ["go", "run", "."]
 
-FROM scratch
-WORKDIR /app
-COPY --from=build /app/server .
-ENTRYPOINT ["./server"]
+#FROM scratch
+#WORKDIR /app
+#COPY --from=build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
+#COPY --from=build /app/server .
+#ENTRYPOINT ["./server"]
