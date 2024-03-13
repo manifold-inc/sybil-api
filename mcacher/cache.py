@@ -15,7 +15,6 @@ async def sync_miners(n: int):
     axons: List[Tuple[bt.AxonInfo, int]] = [
         (metagraph.axons[uid], uid) for uid in uids_with_highest_incentives
     ]
-    axons = [(metagraph.axons[42], 42)]  # TODO
     ips = [
         {"ip": axon.ip, "port": axon.port, "hotkey": axon.hotkey} for (axon, _) in axons
     ]

@@ -30,8 +30,7 @@ import (
 func safeEnv(env string) string {
 	res, present := os.LookupEnv(env)
 	if !present {
-
-		panic(fmt.Sprintf("Missing environment variable %s", env))
+		log.Fatalf("Missing environment variable %s", env)
 	}
 	return res
 }
@@ -40,14 +39,14 @@ func signMessage(message string, public string, private string) string {
 	var pubk [32]byte
 	data, err := hex.DecodeString(public)
 	if err != nil {
-		panic(err)
+		log.Fatalf("Failed to decode public key: %s", err)
 	}
 	copy(pubk[:], data)
 
 	var prik [32]byte
 	data, err = hex.DecodeString(private)
 	if err != nil {
-		panic(err)
+		log.Fatalf("Failed to decode private key: %s", err)
 	}
 	copy(prik[:], data)
 
@@ -64,14 +63,15 @@ func signMessage(message string, public string, private string) string {
 	return "0x" + out
 }
 
-func querySerper(query string, endpoint string) map[string]any {
+func querySerper(query string, endpoint string) (map[string]any, error) {
 	SERPER_KEY := safeEnv("SERPER_KEY")
 	body, _ := json.Marshal(map[string]string{
 		"q": query,
 	})
 	r, err := http.NewRequest("POST", endpoint, bytes.NewBuffer(body))
 	if err != nil {
-		panic(err)
+		log.Printf("Serper Error: %s", err.Error())
+		return nil, err
 	}
 	defer r.Body.Close()
 	r.Header["Content-Type"] = []string{"application/json"}
@@ -79,15 +79,17 @@ func querySerper(query string, endpoint string) map[string]any {
 	client := &http.Client{}
 	res, err := client.Do(r)
 	if err != nil {
-		panic(err)
+		log.Printf("Serper Error: %s", err.Error())
+		return nil, err
 	}
 	defer res.Body.Close()
 	if res.StatusCode != http.StatusOK {
-		panic(res.StatusCode)
+		log.Printf("Serper Error. Status code: %d", res.StatusCode)
+		return nil, err
 	}
 	resp := map[string]any{}
 	json.NewDecoder(res.Body).Decode(&resp)
-	return resp
+	return resp, nil
 }
 
 func hashString(str string) string {
@@ -131,7 +133,11 @@ func sendEvent(c echo.Context, data any) {
 
 func querySearch(wg *sync.WaitGroup, c echo.Context, query string, src chan []string) {
 	defer wg.Done()
-	search := querySerper(query, SEARCH)
+	search, err := querySerper(query, SEARCH)
+	if err != nil {
+		close(src)
+		return
+	}
 	organic_results := search["organic"].([]interface{})
 	sources := []SerperResults{}
 	for _, element := range organic_results {
@@ -166,20 +172,27 @@ func querySearch(wg *sync.WaitGroup, c echo.Context, query string, src chan []st
 	src <- llmSources
 	src <- llmSources
 
-	relatedSearches := search["relatedsSearches"]
-	if relatedSearches == nil {
+	relatedSearches, ok := search["relatedSearches"]
+	if !ok {
 		return
 	}
-	relatedSearches = relatedSearches.([]interface{})
+	var relatedList []string
+	for _, element := range relatedSearches.([]interface{}) {
+		relatedList = append(relatedList, element.(map[string]interface{})["query"].(string))
+	}
 	sendEvent(c, map[string]any{
 		"type":      "related",
-		"followups": relatedSearches,
+		"followups": relatedList,
 	})
 }
 
 func queryNews(wg *sync.WaitGroup, c echo.Context, query string) {
 	defer wg.Done()
-	news := querySerper(query, NEWS)["news"].([]interface{})
+	newsResults, err := querySerper(query, NEWS)
+	if err != nil {
+		return
+	}
+	news := newsResults["news"].([]interface{})
 	if herocard := news[0].(map[string]interface{}); len(news) > 0 {
 		sendEvent(c, map[string]any{
 			"type": "heroCard",
@@ -196,7 +209,11 @@ func queryNews(wg *sync.WaitGroup, c echo.Context, query string) {
 }
 func queryImages(wg *sync.WaitGroup, c echo.Context, query string) {
 	defer wg.Done()
-	images := querySerper(query, IMAGE)["images"].([]interface{})
+	imageResults, err := querySerper(query, IMAGE)
+	if err != nil {
+		return
+	}
+	images := imageResults["images"].([]interface{})
 	if len(images) > 0 {
 		var results []map[string]interface{}
 		for i, v := range images {
@@ -220,6 +237,7 @@ func queryImages(wg *sync.WaitGroup, c echo.Context, query string) {
 }
 
 func queryMiners(wg *sync.WaitGroup, c echo.Context, client *redis.Client, sources chan []string, query string, answer chan string) {
+	defer close(answer)
 	defer wg.Done()
 	ctx := context.Background()
 	defer ctx.Done()
@@ -227,21 +245,25 @@ func queryMiners(wg *sync.WaitGroup, c echo.Context, client *redis.Client, sourc
 	rh.SetGoRedisClientWithContext(ctx, client)
 	minerJSON, err := rh.JSONGet("miners", ".")
 	if err != nil {
-		log.Fatalf("Failed to JSONGet: %s", err.Error())
+		log.Printf("Failed to JSONGet: %s", err.Error())
+		return
 	}
 
 	var minerOut []Miner
 	err = json.Unmarshal(minerJSON.([]byte), &minerOut)
 	if err != nil {
-		log.Fatalf("Failed to JSON Unmarshal: %s", err.Error())
+		log.Printf("Failed to JSON Unmarshal: %s", err.Error())
+		return
 	}
 	firstMiner := minerOut[0]
 	nonce := time.Now().UnixNano()
 
-	var hashes []string
-
-	llm_sources := <-sources
+	llm_sources, more := <-sources
+	if !more {
+		return
+	}
 	formatted := hashString(formatListToPythonString(llm_sources))
+	var hashes []string
 	hashes = append(hashes, formatted)
 	hashes = append(hashes, hashString(query))
 	bodyHash := hashString(strings.Join(hashes, ""))
@@ -309,7 +331,8 @@ func queryMiners(wg *sync.WaitGroup, c echo.Context, client *redis.Client, sourc
 	out, err := json.Marshal(body)
 	r, err := http.NewRequest("POST", endpoint, bytes.NewBuffer(out))
 	if err != nil {
-		panic(err)
+		log.Printf("Failed miner request: %s\n", err.Error())
+		return
 	}
 
 	r.Header["Content-Type"] = []string{"application/json"}
@@ -332,12 +355,14 @@ func queryMiners(wg *sync.WaitGroup, c echo.Context, client *redis.Client, sourc
 	httpClient := &http.Client{}
 	res, err := httpClient.Do(r)
 	if err != nil {
-		panic(err)
+		log.Println(err.Error())
+		return
 	}
 	defer res.Body.Close()
 	if res.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(res.Body)
-		panic(string(body))
+		log.Println(body)
+		return
 	}
 	reader := bufio.NewReader(res.Body)
 	finished := false
@@ -366,7 +391,8 @@ func queryMiners(wg *sync.WaitGroup, c echo.Context, client *redis.Client, sourc
 func saveAnswer(c echo.Context, query string, answer chan string, sources chan []string, session string) {
 	publicId, err := nanoid.Generate("0123456789abcdefghijklmnopqrstuvwxyz", 29)
 	if err != nil {
-		log.Fatal("Failed generating publicId for db:", err)
+		log.Println("Failed generating publicId for db:", err)
+		return
 	}
 	publicId = "sh_" + publicId
 	var nonNullUserId int
@@ -381,17 +407,24 @@ func saveAnswer(c echo.Context, query string, answer chan string, sources chan [
 			AND session.expires_at > CURRENT_TIMESTAMP()
 		`, session).Scan(&userId)
 		if err != nil && err != sql.ErrNoRows {
-			log.Fatal("(Get session) db.Query", err)
+			log.Println("Get userId Error: ", err)
+			return
 		}
 	}
 
-	ans := <-answer
-	srcs := <-sources
+	ans, more := <-answer
+	if !more {
+		return
+	}
+	srcs, more := <-sources
+	if !more {
+		return
+	}
 	jsonSrcs, _ := json.Marshal(srcs)
 	q := `INSERT INTO search (public_id, user_iid, query, sources, completion) VALUES (?, ?, ?, ?, ?);`
 	_, err = db.Exec(q, publicId, userId, query, string(jsonSrcs), ans)
 	if err != nil && err != sql.ErrNoRows {
-		log.Fatal("(Get session) db.Query", err)
+		log.Println("Insert Search Error:", err)
+		return
 	}
-	log.Println("Finished request", ans, srcs)
 }

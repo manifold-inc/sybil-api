@@ -42,8 +42,8 @@ func main() {
 	e := echo.New()
 	client := redis.NewClient(&redis.Options{
 		Addr:     "cache:6379",
-		Password: "", // no password set
-		DB:       0,  // use default DB
+		Password: "",
+		DB:       0,
 	})
 	var err error
 	db, err = sql.Open("mysql", DSN)
@@ -67,7 +67,6 @@ func main() {
 			log.Println("No query")
 			return echo.NewHTTPError(http.StatusBadRequest, "No query found")
 		}
-		log.Println(query)
 
 		c.Response().Header().Set("Content-Type", "text/event-stream; charset=utf-8")
 		c.Response().Header().Set("Cache-Control", "no-cache")
