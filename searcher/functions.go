@@ -404,6 +404,7 @@ func queryMiners(wg *sync.WaitGroup, c echo.Context, client *redis.Client, sourc
 		if finished == false {
 			continue
 		}
+		log.Println(query, ans)
 		answer <- ans
 		break
 	}
