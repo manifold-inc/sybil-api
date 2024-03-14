@@ -268,14 +268,11 @@ func queryMiners(wg *sync.WaitGroup, c echo.Context, client *redis.Client, sourc
 	hashes = append(hashes, hashString(query))
 	bodyHash := hashString(strings.Join(hashes, ""))
 
-	quit := make(chan bool)
+	response := make(chan *http.Response)
 
-	var minerWaitGroup sync.WaitGroup
-	minerWaitGroup.Add(len(minerOut))
+	ctx, cancel := context.WithCancel(ctx)
 	for _, m := range minerOut {
 		go func(miner Miner) {
-			defer minerWaitGroup.Done()
-			isMe := false
 			message := []string{fmt.Sprint(nonce), HOTKEY, miner.Hotkey, INSTANCE_UUID, bodyHash}
 			joinedMessage := strings.Join(message, ".")
 			signedMessage := signMessage(joinedMessage, PUBLIC_KEY, PRIVATE_KEY)
@@ -335,9 +332,10 @@ func queryMiners(wg *sync.WaitGroup, c echo.Context, client *redis.Client, sourc
 				Completion: nil,
 			}
 
+			httpClient := http.Client{}
 			endpoint := "http://" + miner.Ip + ":" + fmt.Sprint(miner.Port) + "/Inference"
 			out, err := json.Marshal(body)
-			r, err := http.NewRequest("POST", endpoint, bytes.NewBuffer(out))
+			r, err := http.NewRequestWithContext(ctx, "POST", endpoint, bytes.NewBuffer(out))
 			if err != nil {
 				log.Printf("Failed miner request: %s\n", err.Error())
 				return
@@ -360,53 +358,58 @@ func queryMiners(wg *sync.WaitGroup, c echo.Context, client *redis.Client, sourc
 			r.Header["header_size"] = []string{"111"}
 			r.Header["total_size"] = []string{"111"}
 			r.Header["computed_body_hash"] = []string{bodyHash}
-			httpClient := &http.Client{}
 			res, err := httpClient.Do(r)
-			select {
-			case <-quit:
-				if !isMe {
-					return
-				}
-			default:
-				if err != nil {
-					log.Println(err.Error())
-					return
-				}
-				defer res.Body.Close()
-				if res.StatusCode != http.StatusOK {
-					body, _ := io.ReadAll(res.Body)
-					log.Println(body)
-					return
-				}
-				isMe = true
-				close(quit)
-
-				reader := bufio.NewReader(res.Body)
-				finished := false
-				ans := ""
-				for {
-					token, err := reader.ReadString(' ')
-					if strings.Contains(token, "<s>") || strings.Contains(token, "</s>") || strings.Contains(token, "<im_end>") {
-						finished = true
-						token = strings.ReplaceAll(token, "<s>", "")
-						token = strings.ReplaceAll(token, "</s>", "")
-						token = strings.ReplaceAll(token, "<im_end>", "")
-					}
-					ans += token
-					sendEvent(c, map[string]any{
-						"type":     "answer",
-						"text":     token,
-						"finished": finished,
-					})
-					if err == io.EOF {
-						break
-					}
-				}
-				answer <- ans
+			if err != context.Canceled {
+				return
 			}
+			if err != nil {
+				log.Println(err.Error())
+				return
+			}
+			if res.StatusCode != http.StatusOK {
+				body, _ := io.ReadAll(res.Body)
+				res.Body.Close()
+				log.Println(string(body))
+				return
+			}
+			response <- res
 		}(m)
 	}
-	minerWaitGroup.Wait()
+	for {
+		res := <-response
+		defer res.Body.Close()
+		reader := bufio.NewReader(res.Body)
+		finished := false
+		ans := ""
+		for {
+			token, err := reader.ReadString(' ')
+			if strings.Contains(token, "<s>") || strings.Contains(token, "</s>") || strings.Contains(token, "<im_end>") {
+				finished = true
+				token = strings.ReplaceAll(token, "<s>", "")
+				token = strings.ReplaceAll(token, "</s>", "")
+				token = strings.ReplaceAll(token, "<im_end>", "")
+			}
+			ans += token
+			sendEvent(c, map[string]any{
+				"type":     "answer",
+				"text":     token,
+				"finished": finished,
+			})
+			if err == io.EOF {
+				break
+			}
+			if err != nil {
+				println(err.Error())
+				break
+			}
+		}
+		if finished == false {
+			continue
+		}
+		answer <- ans
+		break
+	}
+	cancel()
 }
 
 func saveAnswer(c echo.Context, query string, answer chan string, sources chan []string, session string) {
