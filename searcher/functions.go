@@ -360,9 +360,6 @@ func queryMiners(wg *sync.WaitGroup, c echo.Context, client *redis.Client, sourc
 			r.Header["total_size"] = []string{"111"}
 			r.Header["computed_body_hash"] = []string{bodyHash}
 			res, err := httpClient.Do(r)
-			if err != context.Canceled {
-				return
-			}
 			if err != nil {
 				log.Println(err.Error())
 				return
