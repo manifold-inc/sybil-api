@@ -83,10 +83,10 @@ func search(c echo.Context) (err error) {
 	sources := make(chan []string)
 	answer := make(chan string)
 	var wg sync.WaitGroup
-	wg.Add(4)
+	wg.Add(3)
 	go querySearch(&wg, c, query, sources)
 	go queryNews(&wg, c, query)
-	go queryImages(&wg, c, query)
+	//go queryImages(&wg, c, query)
 	go queryMiners(&wg, c, client, sources, query, answer)
 	go saveAnswer(c, query, answer, sources, c.Request().Header.Get("X-SESSION-ID"))
 	wg.Wait()
