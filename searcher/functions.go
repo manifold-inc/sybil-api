@@ -388,11 +388,6 @@ func queryMiners(wg *sync.WaitGroup, c echo.Context, client *redis.Client, sourc
 				token = strings.ReplaceAll(token, "<im_end>", "")
 			}
 			ans += token
-			sendEvent(c, map[string]any{
-				"type":     "answer",
-				"text":     token,
-				"finished": finished,
-			})
 			if err == io.EOF {
 				break
 			}
@@ -400,6 +395,11 @@ func queryMiners(wg *sync.WaitGroup, c echo.Context, client *redis.Client, sourc
 				println(err.Error())
 				break
 			}
+			sendEvent(c, map[string]any{
+				"type":     "answer",
+				"text":     token,
+				"finished": finished,
+			})
 		}
 		if finished == false {
 			continue
