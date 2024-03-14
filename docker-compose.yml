@@ -14,6 +14,7 @@ services:
     depends_on:
       cache:
         condition: service_healthy
+
   mcacher:
     build:
       context: ./mcacher
@@ -30,6 +31,7 @@ services:
       interval: "3s"
     volumes: 
       - cache:/data
+
   traefik:
     image: traefik:v2.3
     ports:
@@ -38,7 +40,7 @@ services:
     restart: always
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
-      - $PWD/traefik/traefik.toml:/etc/traefik/traefik.toml
+      - ./traefik/traefik.toml:/etc/traefik/traefik.toml
       - traefik-public-certificates:/certificates
 
 volumes:

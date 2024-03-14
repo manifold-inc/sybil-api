@@ -1,4 +1,4 @@
-FROM golang:latest as build
+FROM golang:alpine as build
 
 WORKDIR /app
 
@@ -11,10 +11,10 @@ RUN go mod download
 
 COPY . .
 
-RUN GOOS=linux GOARCH=amd64 go build -ldflags="-w -s" -o server .
+RUN GOOS=linux go build -o server
 
-FROM scratch
+FROM alpine:3.9 
 WORKDIR /app
-COPY --from=build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
-COPY --from=build /app/server .
-ENTRYPOINT ["./server"]
+RUN apk add ca-certificates
+COPY --from=build /app/server server
+CMD ["/app/server"]
