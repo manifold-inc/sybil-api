@@ -193,7 +193,8 @@ func queryNews(wg *sync.WaitGroup, c echo.Context, query string) {
 		return
 	}
 	news := newsResults["news"].([]interface{})
-	if herocard := news[0].(map[string]interface{}); len(news) > 0 {
+	if len(news) > 0 {
+		herocard := news[0].(map[string]interface{})
 		sendEvent(c, map[string]any{
 			"type": "heroCard",
 			"heroCard": map[string]string{
