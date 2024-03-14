@@ -12,7 +12,11 @@ build opts = "":
   @printf " {{GREEN}}{{CHECK}} Successfully built! {{CHECK}} {{RESET}}"
 
 up: build
-  docker compose up -d searcher mcacher
+  docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
+  @printf " {{GREEN}}{{CHECK}} Images Started {{CHECK}} {{RESET}}"
+
+prod: build
+  docker compose up -d
   @printf " {{GREEN}}{{CHECK}} Images Started {{CHECK}} {{RESET}}"
 
 down:

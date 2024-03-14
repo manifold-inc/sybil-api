@@ -1,9 +1,13 @@
 version: '3'
 services:
   searcher:
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.searcher.rule=Host(`mx-central-02.sybil.com`)
+      - traefik.http.routers.searcher.tls=true
+      - traefik.http.routers.searcher.tls.certresolver=letsencrypt
+      - traefik.http.services.searcher.loadbalancer.server.port=80
     env_file: .env
-    ports:
-      - '80:80'
     build:
       context: ./searcher
     restart: always
@@ -21,14 +25,23 @@ services:
   cache:
     image: redis/redis-stack-server:latest
     restart: always
-    ports:
-      - '6379:6379'
     healthcheck:
       test: [ "CMD", "redis-cli", "--raw", "incr", "ping" ]
       interval: "3s"
     volumes: 
       - cache:/data
+  traefik:
+    image: traefik:v2.3
+    ports:
+      - 80:80
+      - 443:443
+    restart: always
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - $PWD/traefik/traefik.toml:/etc/traefik/traefik.toml
+      - traefik-public-certificates:/certificates
 
 volumes:
+  traefik-public-certificates:
   cache:
     driver: local

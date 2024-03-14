@@ -255,7 +255,7 @@ func queryMiners(wg *sync.WaitGroup, c echo.Context, client *redis.Client, sourc
 		log.Printf("Failed to JSON Unmarshal: %s", err.Error())
 		return
 	}
-	firstMiner := minerOut[0]
+
 	nonce := time.Now().UnixNano()
 
 	llm_sources, more := <-sources
@@ -268,124 +268,145 @@ func queryMiners(wg *sync.WaitGroup, c echo.Context, client *redis.Client, sourc
 	hashes = append(hashes, hashString(query))
 	bodyHash := hashString(strings.Join(hashes, ""))
 
-	message := []string{fmt.Sprint(nonce), HOTKEY, firstMiner.Hotkey, INSTANCE_UUID, bodyHash}
-	joinedMessage := strings.Join(message, ".")
-	signedMessage := signMessage(joinedMessage, PUBLIC_KEY, PRIVATE_KEY)
-	port := fmt.Sprint(firstMiner.Port)
-	version := 670
-	body := SearchBody{
-		Name:           "Inference",
-		Timeout:        12.0,
-		TotalSize:      0,
-		HeaderSize:     0,
-		RequiredFields: []string{"sources", "query", "seed"},
-		Sources:        llm_sources,
-		Query:          query,
-		BodyHash:       "",
-		Dendrite: DendriteOrAxon{
-			Ip:            IP,
-			Version:       &version,
-			Nonce:         &nonce,
-			Uuid:          &INSTANCE_UUID,
-			Hotkey:        HOTKEY,
-			Signature:     &signedMessage,
-			Port:          nil,
-			StatusCode:    nil,
-			StatusMessage: nil,
-			ProcessTime:   nil,
-		},
-		Axon: DendriteOrAxon{
-			StatusCode:    nil,
-			StatusMessage: nil,
-			ProcessTime:   nil,
-			Version:       nil,
-			Nonce:         nil,
-			Uuid:          nil,
-			Signature:     nil,
-			Ip:            firstMiner.Ip,
-			Port:          &port,
-			Hotkey:        firstMiner.Hotkey,
-		},
-		SamplingParams: SamplingParams{
-			Seed:                nil,
-			Truncate:            nil,
-			BestOf:              1,
-			DecoderInputDetails: true,
-			Details:             false,
-			DoSample:            true,
-			MaxNewTokens:        3072,
-			RepetitionPenalty:   1.0,
-			ReturnFullText:      false,
-			Stop:                []string{"photographer"},
-			Temperature:         .01,
-			TopK:                10,
-			TopNTokens:          5,
-			TopP:                .9999999,
-			TypicalP:            .9999999,
-			Watermark:           false,
-		},
-		Completion: nil,
-	}
+	quit := make(chan bool)
 
-	endpoint := "http://" + firstMiner.Ip + ":" + fmt.Sprint(firstMiner.Port) + "/Inference"
-	out, err := json.Marshal(body)
-	r, err := http.NewRequest("POST", endpoint, bytes.NewBuffer(out))
-	if err != nil {
-		log.Printf("Failed miner request: %s\n", err.Error())
-		return
-	}
+	var minerWaitGroup sync.WaitGroup
+	minerWaitGroup.Add(len(minerOut))
+	for _, m := range minerOut {
+		go func(miner Miner) {
+			defer minerWaitGroup.Done()
+			isMe := false
+			message := []string{fmt.Sprint(nonce), HOTKEY, miner.Hotkey, INSTANCE_UUID, bodyHash}
+			joinedMessage := strings.Join(message, ".")
+			signedMessage := signMessage(joinedMessage, PUBLIC_KEY, PRIVATE_KEY)
+			port := fmt.Sprint(miner.Port)
+			version := 670
+			body := SearchBody{
+				Name:           "Inference",
+				Timeout:        12.0,
+				TotalSize:      0,
+				HeaderSize:     0,
+				RequiredFields: []string{"sources", "query", "seed"},
+				Sources:        llm_sources,
+				Query:          query,
+				BodyHash:       "",
+				Dendrite: DendriteOrAxon{
+					Ip:            IP,
+					Version:       &version,
+					Nonce:         &nonce,
+					Uuid:          &INSTANCE_UUID,
+					Hotkey:        HOTKEY,
+					Signature:     &signedMessage,
+					Port:          nil,
+					StatusCode:    nil,
+					StatusMessage: nil,
+					ProcessTime:   nil,
+				},
+				Axon: DendriteOrAxon{
+					StatusCode:    nil,
+					StatusMessage: nil,
+					ProcessTime:   nil,
+					Version:       nil,
+					Nonce:         nil,
+					Uuid:          nil,
+					Signature:     nil,
+					Ip:            miner.Ip,
+					Port:          &port,
+					Hotkey:        miner.Hotkey,
+				},
+				SamplingParams: SamplingParams{
+					Seed:                nil,
+					Truncate:            nil,
+					BestOf:              1,
+					DecoderInputDetails: true,
+					Details:             false,
+					DoSample:            true,
+					MaxNewTokens:        3072,
+					RepetitionPenalty:   1.0,
+					ReturnFullText:      false,
+					Stop:                []string{"photographer"},
+					Temperature:         .01,
+					TopK:                10,
+					TopNTokens:          5,
+					TopP:                .9999999,
+					TypicalP:            .9999999,
+					Watermark:           false,
+				},
+				Completion: nil,
+			}
 
-	r.Header["Content-Type"] = []string{"application/json"}
-	r.Header["name"] = []string{"Inference"}
-	r.Header["timeout"] = []string{"12.0"}
-	r.Header["bt_header_axon_ip"] = []string{firstMiner.Ip}
-	r.Header["bt_header_axon_port"] = []string{strconv.Itoa(firstMiner.Port)}
-	r.Header["bt_header_axon_hotkey"] = []string{firstMiner.Hotkey}
-	r.Header["bt_header_dendrite_ip"] = []string{IP}
-	r.Header["bt_header_dendrite_version"] = []string{"670"}
-	r.Header["bt_header_dendrite_nonce"] = []string{strconv.Itoa(int(nonce))}
-	r.Header["bt_header_dendrite_uuid"] = []string{INSTANCE_UUID}
-	r.Header["bt_header_dendrite_hotkey"] = []string{HOTKEY}
-	r.Header["bt_header_input_obj_sources"] = []string{"W10="}
-	r.Header["bt_header_input_obj_query"] = []string{"IiI="}
-	r.Header["bt_header_dendrite_signature"] = []string{signedMessage}
-	r.Header["header_size"] = []string{"111"}
-	r.Header["total_size"] = []string{"111"}
-	r.Header["computed_body_hash"] = []string{bodyHash}
-	httpClient := &http.Client{}
-	res, err := httpClient.Do(r)
-	if err != nil {
-		log.Println(err.Error())
-		return
+			endpoint := "http://" + miner.Ip + ":" + fmt.Sprint(miner.Port) + "/Inference"
+			out, err := json.Marshal(body)
+			r, err := http.NewRequest("POST", endpoint, bytes.NewBuffer(out))
+			if err != nil {
+				log.Printf("Failed miner request: %s\n", err.Error())
+				return
+			}
+
+			r.Header["Content-Type"] = []string{"application/json"}
+			r.Header["name"] = []string{"Inference"}
+			r.Header["timeout"] = []string{"12.0"}
+			r.Header["bt_header_axon_ip"] = []string{miner.Ip}
+			r.Header["bt_header_axon_port"] = []string{strconv.Itoa(miner.Port)}
+			r.Header["bt_header_axon_hotkey"] = []string{miner.Hotkey}
+			r.Header["bt_header_dendrite_ip"] = []string{IP}
+			r.Header["bt_header_dendrite_version"] = []string{"670"}
+			r.Header["bt_header_dendrite_nonce"] = []string{strconv.Itoa(int(nonce))}
+			r.Header["bt_header_dendrite_uuid"] = []string{INSTANCE_UUID}
+			r.Header["bt_header_dendrite_hotkey"] = []string{HOTKEY}
+			r.Header["bt_header_input_obj_sources"] = []string{"W10="}
+			r.Header["bt_header_input_obj_query"] = []string{"IiI="}
+			r.Header["bt_header_dendrite_signature"] = []string{signedMessage}
+			r.Header["header_size"] = []string{"111"}
+			r.Header["total_size"] = []string{"111"}
+			r.Header["computed_body_hash"] = []string{bodyHash}
+			httpClient := &http.Client{}
+			res, err := httpClient.Do(r)
+			select {
+			case <-quit:
+				if !isMe {
+					return
+				}
+			default:
+				if err != nil {
+					log.Println(err.Error())
+					return
+				}
+				defer res.Body.Close()
+				if res.StatusCode != http.StatusOK {
+					body, _ := io.ReadAll(res.Body)
+					log.Println(body)
+					return
+				}
+				isMe = true
+				close(quit)
+
+				reader := bufio.NewReader(res.Body)
+				finished := false
+				ans := ""
+				for {
+					token, err := reader.ReadString(' ')
+					if strings.Contains(token, "<s>") || strings.Contains(token, "</s>") || strings.Contains(token, "<im_end>") {
+						finished = true
+						token = strings.ReplaceAll(token, "<s>", "")
+						token = strings.ReplaceAll(token, "</s>", "")
+						token = strings.ReplaceAll(token, "<im_end>", "")
+					}
+					ans += token
+					sendEvent(c, map[string]any{
+						"type":     "answer",
+						"text":     token,
+						"finished": finished,
+					})
+					if err == io.EOF {
+						break
+					}
+				}
+				answer <- ans
+			}
+		}(m)
 	}
-	defer res.Body.Close()
-	if res.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(res.Body)
-		log.Println(body)
-		return
-	}
-	reader := bufio.NewReader(res.Body)
-	finished := false
-	ans := ""
-	for {
-		token, err := reader.ReadString(' ')
-		if strings.Contains(token, "<s>") || strings.Contains(token, "</s>") || strings.Contains(token, "<im_end>") {
-			finished = true
-			token = strings.ReplaceAll(token, "<s>", "")
-			token = strings.ReplaceAll(token, "</s>", "")
-			token = strings.ReplaceAll(token, "<im_end>", "")
-		}
-		ans += token
-		sendEvent(c, map[string]any{
-			"type":     "answer",
-			"text":     token,
-			"finished": finished,
-		})
-		if err == io.EOF {
-			break
-		}
-	}
-	answer <- ans
+	minerWaitGroup.Wait()
 }
 
 func saveAnswer(c echo.Context, query string, answer chan string, sources chan []string, session string) {

@@ -1,0 +1,16 @@
+version: '3'
+services:
+  searcher:
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.searcher.rule=Host(`localhost`)
+      - traefik.http.routers.searcher.tls=false
+      - traefik.http.routers.searcher.tls.certresolver=
+      - traefik.http.services.searcher.loadbalancer.server.port=80
+  traefik:
+    ports:
+      - 80:80
+    restart: always
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - $PWD/traefik/traefik.dev.toml:/etc/traefik/traefik.toml
