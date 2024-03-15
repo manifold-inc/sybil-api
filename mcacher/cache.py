@@ -16,7 +16,7 @@ async def sync_miners(n: int):
         (metagraph.axons[uid], uid) for uid in uids_with_highest_incentives
     ]
     ips = [
-        {"ip": axon.ip, "port": axon.port, "hotkey": axon.hotkey} for (axon, _) in axons
+            {"ip": axon.ip, "port": axon.port, "hotkey": axon.hotkey, "coldkey": axon.coldkey} for (axon, _) in axons
     ]
     print("Saving new miners to cache", flush=True)
     r.json().set("miners", obj=ips, path=Path.root_path())

@@ -78,7 +78,6 @@ func search(c echo.Context) (err error) {
 	c.Response().Header().Set("Cache-Control", "no-cache")
 	c.Response().Header().Set("Connection", "keep-alive")
 	c.Response().Header().Set("X-Accel-Buffering", "no")
-	c.Response().WriteHeader(http.StatusOK)
 
 	sources := make(chan []string)
 	answer := make(chan string)

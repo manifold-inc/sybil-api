@@ -196,7 +196,7 @@ func queryNews(wg *sync.WaitGroup, c echo.Context, query string) {
 	if len(news) > 0 {
 		herocard := news[0].(map[string]interface{})
 		link, ok := herocard["link"]
-		if(!ok){
+		if !ok {
 			return
 		}
 		sendEvent(c, map[string]any{
@@ -276,8 +276,18 @@ func queryMiners(wg *sync.WaitGroup, c echo.Context, client *redis.Client, sourc
 	response := make(chan *http.Response)
 
 	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	minersLeft := len(minerOut)
+	var minerWaitGroup sync.WaitGroup
+	minerWaitGroup.Add(len(minerOut))
+	go func() {
+		minerWaitGroup.Wait()
+		close(response)
+	}()
 	for _, m := range minerOut {
 		go func(miner Miner) {
+			defer func() { minersLeft = minersLeft - 1 }()
+			defer minerWaitGroup.Done()
 			message := []string{fmt.Sprint(nonce), HOTKEY, miner.Hotkey, INSTANCE_UUID, bodyHash}
 			joinedMessage := strings.Join(message, ".")
 			signedMessage := signMessage(joinedMessage, PUBLIC_KEY, PRIVATE_KEY)
@@ -365,20 +375,36 @@ func queryMiners(wg *sync.WaitGroup, c echo.Context, client *redis.Client, sourc
 			r.Header["computed_body_hash"] = []string{bodyHash}
 			res, err := httpClient.Do(r)
 			if err != nil {
-				log.Println(err.Error())
+				log.Printf("Miner: %s %s\nError: %s", miner.Hotkey, miner.Coldkey, err.Error())
+				res.Body.Close()
 				return
 			}
 			if res.StatusCode != http.StatusOK {
-				body, _ := io.ReadAll(res.Body)
+				bdy, _ := io.ReadAll(res.Body)
 				res.Body.Close()
-				log.Println(string(body))
+				log.Printf("Miner: %s %s\nError: %s", miner.Hotkey, miner.Coldkey, string(bdy))
 				return
+			}
+			axon_version := res.Header.Get("Bt_header_axon_version")
+			ver, err := strconv.Atoi(axon_version)
+			if err != nil || ver < 672 {
+				bdy, _ := io.ReadAll(res.Body)
+				res.Body.Close()
+				log.Printf("Miner: %s %s\nError: %s", miner.Hotkey, miner.Coldkey, string(bdy))
 			}
 			response <- res
 		}(m)
 	}
+
+	i := 0
 	for {
-		res := <-response
+		res, ok := <-response
+		println("Attempt:", i)
+		i++
+		if !ok {
+			c.Response().WriteHeader(http.StatusInternalServerError)
+			return
+		}
 		defer res.Body.Close()
 		reader := bufio.NewReader(res.Body)
 		finished := false
@@ -392,11 +418,8 @@ func queryMiners(wg *sync.WaitGroup, c echo.Context, client *redis.Client, sourc
 				token = strings.ReplaceAll(token, "<im_end>", "")
 			}
 			ans += token
-			if err == io.EOF {
-				break
-			}
-			if err != nil {
-				println(err.Error())
+			if err != nil && err != io.EOF {
+				println(i, err.Error())
 				break
 			}
 			sendEvent(c, map[string]any{
@@ -404,15 +427,31 @@ func queryMiners(wg *sync.WaitGroup, c echo.Context, client *redis.Client, sourc
 				"text":     token,
 				"finished": finished,
 			})
+			if err == io.EOF {
+				println(i, "EOF")
+				break
+			}
 		}
 		if finished == false {
 			continue
 		}
-		log.Println(query, ans)
+		println("Finished", i)
 		answer <- ans
 		break
 	}
-	cancel()
+	for {
+		select {
+		case res, ok := <-response:
+			if !ok {
+				response = nil
+				break
+			}
+			res.Body.Close()
+		}
+		if response == nil {
+			break
+		}
+	}
 }
 
 func saveAnswer(c echo.Context, query string, answer chan string, sources chan []string, session string) {
@@ -441,10 +480,12 @@ func saveAnswer(c echo.Context, query string, answer chan string, sources chan [
 
 	ans, more := <-answer
 	if !more {
+		log.Println("Faield to get answer")
 		return
 	}
 	srcs, more := <-sources
 	if !more {
+		log.Println("Faield to get sources")
 		return
 	}
 	jsonSrcs, _ := json.Marshal(srcs)
@@ -454,4 +495,5 @@ func saveAnswer(c echo.Context, query string, answer chan string, sources chan [
 		log.Println("Insert Search Error:", err)
 		return
 	}
+	log.Println("Inserted into db")
 }
