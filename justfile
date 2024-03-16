@@ -19,6 +19,11 @@ prod: build
   docker compose up -d
   @printf " {{GREEN}}{{CHECK}} Images Started {{CHECK}} {{RESET}}"
 
+upgrade: build
+  git pull
+  docker compose up -d searcher mcacher
+  @printf " {{GREEN}}{{CHECK}} Images Started {{CHECK}} {{RESET}}"
+
 down:
   @docker compose down
 

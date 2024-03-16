@@ -363,15 +363,15 @@ func queryMiners(wg *sync.WaitGroup, c echo.Context, client *redis.Client, sourc
 			r.Header["bt_header_axon_port"] = []string{strconv.Itoa(miner.Port)}
 			r.Header["bt_header_axon_hotkey"] = []string{miner.Hotkey}
 			r.Header["bt_header_dendrite_ip"] = []string{IP}
-			r.Header["bt_header_dendrite_version"] = []string{"670"}
+			r.Header["bt_header_dendrite_version"] = []string{"672"}
 			r.Header["bt_header_dendrite_nonce"] = []string{strconv.Itoa(int(nonce))}
 			r.Header["bt_header_dendrite_uuid"] = []string{INSTANCE_UUID}
 			r.Header["bt_header_dendrite_hotkey"] = []string{HOTKEY}
 			r.Header["bt_header_input_obj_sources"] = []string{"W10="}
 			r.Header["bt_header_input_obj_query"] = []string{"IiI="}
 			r.Header["bt_header_dendrite_signature"] = []string{signedMessage}
-			r.Header["header_size"] = []string{"111"}
-			r.Header["total_size"] = []string{"111"}
+			r.Header["header_size"] = []string{"0"}
+			r.Header["total_size"] = []string{"0"}
 			r.Header["computed_body_hash"] = []string{bodyHash}
 			res, err := httpClient.Do(r)
 			if err != nil {
@@ -391,16 +391,14 @@ func queryMiners(wg *sync.WaitGroup, c echo.Context, client *redis.Client, sourc
 				bdy, _ := io.ReadAll(res.Body)
 				res.Body.Close()
 				log.Printf("Miner: %s %s\nError: %s", miner.Hotkey, miner.Coldkey, string(bdy))
+				return
 			}
 			response <- res
 		}(m)
 	}
 
-	i := 0
 	for {
 		res, ok := <-response
-		println("Attempt:", i)
-		i++
 		if !ok {
 			c.Response().WriteHeader(http.StatusInternalServerError)
 			return
@@ -419,7 +417,6 @@ func queryMiners(wg *sync.WaitGroup, c echo.Context, client *redis.Client, sourc
 			}
 			ans += token
 			if err != nil && err != io.EOF {
-				println(i, err.Error())
 				break
 			}
 			sendEvent(c, map[string]any{
@@ -428,14 +425,12 @@ func queryMiners(wg *sync.WaitGroup, c echo.Context, client *redis.Client, sourc
 				"finished": finished,
 			})
 			if err == io.EOF {
-				println(i, "EOF")
 				break
 			}
 		}
 		if finished == false {
 			continue
 		}
-		println("Finished", i)
 		answer <- ans
 		break
 	}
