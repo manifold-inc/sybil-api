@@ -376,7 +376,6 @@ func queryMiners(wg *sync.WaitGroup, c echo.Context, client *redis.Client, sourc
 			res, err := httpClient.Do(r)
 			if err != nil {
 				log.Printf("Miner: %s %s\nError: %s", miner.Hotkey, miner.Coldkey, err.Error())
-				res.Body.Close()
 				return
 			}
 			if res.StatusCode != http.StatusOK {
