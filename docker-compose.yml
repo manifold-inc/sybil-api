@@ -1,6 +1,7 @@
 version: '3'
 services:
   searcher:
+    scale: 3
     labels:
       - traefik.enable=true
       - traefik.http.routers.searcher.rule=Host(`mx-central-02.sybil.com`)
