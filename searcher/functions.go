@@ -199,12 +199,16 @@ func queryNews(wg *sync.WaitGroup, c echo.Context, query string) {
 		if !ok {
 			return
 		}
+		image, ok := herocard["imageUrl"]
+		if !ok {
+			image = "https://img.freepik.com/premium-vector/beautiful-colorful-gradient-background_492281-1165.jpg"
+		}
 		sendEvent(c, map[string]any{
 			"type": "heroCard",
 			"heroCard": map[string]string{
 				"type":  "news",
 				"url":   link.(string),
-				"image": herocard["imageUrl"].(string),
+				"image": image.(string),
 				"title": herocard["title"].(string),
 				"intro": herocard["snippet"].(string),
 				"size":  "auto",
