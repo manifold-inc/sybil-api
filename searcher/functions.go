@@ -197,11 +197,22 @@ func queryNews(wg *sync.WaitGroup, c echo.Context, query string) {
 		herocard := news[0].(map[string]interface{})
 		link, ok := herocard["link"]
 		if !ok {
+			for k, v := range herocard {
+				fmt.Println(k, "value is", v)
+			}
 			return
 		}
 		image, ok := herocard["imageUrl"]
 		if !ok {
 			image = "https://img.freepik.com/premium-vector/beautiful-colorful-gradient-background_492281-1165.jpg"
+		}
+		snippet, ok := herocard["snippet"]
+		if !ok {
+			snippet = "Top Result from search"
+		}
+		title, ok := herocard["title"]
+		if !ok {
+			title = "Top Result"
 		}
 		sendEvent(c, map[string]any{
 			"type": "heroCard",
@@ -209,8 +220,8 @@ func queryNews(wg *sync.WaitGroup, c echo.Context, query string) {
 				"type":  "news",
 				"url":   link.(string),
 				"image": image.(string),
-				"title": herocard["title"].(string),
-				"intro": herocard["snippet"].(string),
+				"title": title.(string),
+				"intro": snippet.(string),
 				"size":  "auto",
 			},
 		})
