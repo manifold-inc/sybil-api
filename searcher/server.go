@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
-	"strconv"
 	"sync"
 
 	_ "github.com/go-sql-driver/mysql"
@@ -58,18 +57,17 @@ func main() {
 	defer db.Close()
 	e.POST("/search", search)
 	e.POST("/search/sources", func(c echo.Context) error {
-		pageParam := c.QueryParam("page")
+		type RequestBody struct {
+			Query string `json:"query"`
+			Page  int    `json:"page"`
+		}
 		var requestBody RequestBody
 		err = json.NewDecoder(c.Request().Body).Decode(&requestBody)
 		query := requestBody.Query
-		if len(pageParam) == 0 || err != nil {
-			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
-		}
-		page, err := strconv.Atoi(pageParam)
 		if err != nil {
 			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 		}
-		search, err := querySerper(query, SEARCH, page)
+		search, err := querySerper(query, SEARCH, requestBody.Page)
 		if err != nil {
 			return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 		}
@@ -80,6 +78,10 @@ func main() {
 }
 
 func search(c echo.Context) (err error) {
+	type RequestBody struct {
+		Query string   `json:"query"`
+		Files []string `json:"files"`
+	}
 	c.Request().Header.Add("Content-Type", "application/json")
 	var requestBody RequestBody
 	err = json.NewDecoder(c.Request().Body).Decode(&requestBody)

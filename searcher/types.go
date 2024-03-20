@@ -7,11 +7,6 @@ type Miner struct {
 	Coldkey string `json:"coldkey,omitempty"`
 }
 
-type RequestBody struct {
-	Query string   `json:"query"`
-	Files []string `json:"files"`
-}
-
 type SearchBody struct {
 	Name           string         `json:"name"`
 	Timeout        float32        `json:"timeout"`
