@@ -11,6 +11,9 @@ build opts = "":
   docker compose build {{opts}}
   @printf " {{GREEN}}{{CHECK}} Successfully built! {{CHECK}} {{RESET}}"
 
+pull:
+  @git pull
+
 up: build
   docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
   @printf " {{GREEN}}{{CHECK}} Images Started {{CHECK}} {{RESET}}"
@@ -19,8 +22,7 @@ prod: build
   docker compose up -d
   @printf " {{GREEN}}{{CHECK}} Images Started {{CHECK}} {{RESET}}"
 
-upgrade: build
-  git pull
+upgrade: pull build
   docker compose up -d searcher mcacher
   @printf " {{GREEN}}{{CHECK}} Images Started {{CHECK}} {{RESET}}"
 

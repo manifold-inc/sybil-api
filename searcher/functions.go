@@ -63,10 +63,11 @@ func signMessage(message string, public string, private string) string {
 	return "0x" + out
 }
 
-func querySerper(query string, endpoint string) (map[string]any, error) {
+func querySerper(query string, endpoint string, page int) (map[string]any, error) {
 	SERPER_KEY := safeEnv("SERPER_KEY")
-	body, _ := json.Marshal(map[string]string{
-		"q": query,
+	body, _ := json.Marshal(map[string]interface{}{
+		"q":    query,
+		"page": page,
 	})
 	r, err := http.NewRequest("POST", endpoint, bytes.NewBuffer(body))
 	if err != nil {
@@ -131,13 +132,7 @@ func sendEvent(c echo.Context, data any) {
 	c.Response().Flush()
 }
 
-func querySearch(wg *sync.WaitGroup, c echo.Context, query string, src chan []string) {
-	defer wg.Done()
-	search, err := querySerper(query, SEARCH)
-	if err != nil {
-		close(src)
-		return
-	}
+func parseSources(search map[string]any) []SerperResults {
 	organic_results := search["organic"].([]interface{})
 	sources := []SerperResults{}
 	for _, element := range organic_results {
@@ -161,6 +156,18 @@ func querySearch(wg *sync.WaitGroup, c echo.Context, query string, src chan []st
 			Published: date,
 		})
 	}
+	return sources
+}
+
+func querySearch(wg *sync.WaitGroup, c echo.Context, query string, src chan []string, page int) {
+	defer wg.Done()
+	search, err := querySerper(query, SEARCH, page)
+	if err != nil {
+		close(src)
+		return
+	}
+	sources := parseSources(search)
+
 	sendEvent(c, map[string]any{
 		"type":    "sources",
 		"sources": sources,
@@ -174,6 +181,10 @@ func querySearch(wg *sync.WaitGroup, c echo.Context, query string, src chan []st
 
 	relatedSearches, ok := search["relatedSearches"]
 	if !ok {
+		sendEvent(c, map[string]any{
+			"type":      "related",
+			"followups": []string{},
+		})
 		return
 	}
 	var relatedList []string
@@ -188,7 +199,7 @@ func querySearch(wg *sync.WaitGroup, c echo.Context, query string, src chan []st
 
 func queryNews(wg *sync.WaitGroup, c echo.Context, query string) {
 	defer wg.Done()
-	newsResults, err := querySerper(query, NEWS)
+	newsResults, err := querySerper(query, NEWS, 1)
 	if err != nil {
 		return
 	}
@@ -197,9 +208,10 @@ func queryNews(wg *sync.WaitGroup, c echo.Context, query string) {
 		herocard := news[0].(map[string]interface{})
 		link, ok := herocard["link"]
 		if !ok {
-			for k, v := range herocard {
-				fmt.Println(k, "value is", v)
-			}
+			sendEvent(c, map[string]any{
+				"type":     "heroCard",
+				"heroCard": nil,
+			})
 			return
 		}
 		image, ok := herocard["imageUrl"]
@@ -229,7 +241,7 @@ func queryNews(wg *sync.WaitGroup, c echo.Context, query string) {
 }
 func queryImages(wg *sync.WaitGroup, c echo.Context, query string) {
 	defer wg.Done()
-	imageResults, err := querySerper(query, IMAGE)
+	imageResults, err := querySerper(query, IMAGE, 1)
 	if err != nil {
 		return
 	}

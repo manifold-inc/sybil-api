@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"strconv"
 	"sync"
 
 	_ "github.com/go-sql-driver/mysql"
@@ -56,7 +57,25 @@ func main() {
 	}
 	defer db.Close()
 	e.POST("/search", search)
-	e.POST("/v1/threads/search", search)
+	e.POST("/search/sources", func(c echo.Context) error {
+		pageParam := c.QueryParam("page")
+		var requestBody RequestBody
+		err = json.NewDecoder(c.Request().Body).Decode(&requestBody)
+		query := requestBody.Query
+		if len(pageParam) == 0 || err != nil {
+			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		}
+		page, err := strconv.Atoi(pageParam)
+		if err != nil {
+			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		}
+		search, err := querySerper(query, SEARCH, page)
+		if err != nil {
+			return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		}
+		sources := parseSources(search)
+		return c.JSON(200, sources)
+	})
 	e.Logger.Fatal(e.Start(":80"))
 }
 
@@ -83,7 +102,7 @@ func search(c echo.Context) (err error) {
 	answer := make(chan string)
 	var wg sync.WaitGroup
 	wg.Add(3)
-	go querySearch(&wg, c, query, sources)
+	go querySearch(&wg, c, query, sources, 0)
 	go queryNews(&wg, c, query)
 	//go queryImages(&wg, c, query)
 	go queryMiners(&wg, c, client, sources, query, answer)
