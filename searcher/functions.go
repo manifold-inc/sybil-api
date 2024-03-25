@@ -174,7 +174,7 @@ func querySearch(wg *sync.WaitGroup, c echo.Context, query string, src chan []st
 	})
 	var llmSources []string
 	for _, element := range sources {
-		llmSources = append(llmSources, fmt.Sprintf("Title: %s:\nSnippet: %s", element.Title, element.Snippet))
+		llmSources = append(llmSources, fmt.Sprintf("Title: %s:\nSnippet: %s\n", element.Title, element.Snippet))
 	}
 	src <- llmSources
 	src <- llmSources
@@ -304,22 +304,26 @@ func queryMiners(wg *sync.WaitGroup, c echo.Context, client *redis.Client, sourc
 
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	minersLeft := len(minerOut)
 	var minerWaitGroup sync.WaitGroup
 	minerWaitGroup.Add(len(minerOut))
 	go func() {
 		minerWaitGroup.Wait()
 		close(response)
 	}()
+	tr := &http.Transport{
+		MaxIdleConns:       10,
+		IdleConnTimeout:    30 * time.Second,
+		DisableKeepAlives: false,
+	}
+	httpClient := http.Client{Transport: tr}
 	for _, m := range minerOut {
 		go func(miner Miner) {
-			defer func() { minersLeft = minersLeft - 1 }()
 			defer minerWaitGroup.Done()
 			message := []string{fmt.Sprint(nonce), HOTKEY, miner.Hotkey, INSTANCE_UUID, bodyHash}
 			joinedMessage := strings.Join(message, ".")
 			signedMessage := signMessage(joinedMessage, PUBLIC_KEY, PRIVATE_KEY)
 			port := fmt.Sprint(miner.Port)
-			version := 670
+			version := 672
 			body := SearchBody{
 				Name:           "Inference",
 				Timeout:        12.0,
@@ -330,7 +334,7 @@ func queryMiners(wg *sync.WaitGroup, c echo.Context, client *redis.Client, sourc
 				Query:          query,
 				BodyHash:       "",
 				Dendrite: DendriteOrAxon{
-					Ip:            IP,
+					Ip:            "10.0.0.1",
 					Version:       &version,
 					Nonce:         &nonce,
 					Uuid:          &INSTANCE_UUID,
@@ -374,7 +378,6 @@ func queryMiners(wg *sync.WaitGroup, c echo.Context, client *redis.Client, sourc
 				Completion: nil,
 			}
 
-			httpClient := http.Client{}
 			endpoint := "http://" + miner.Ip + ":" + fmt.Sprint(miner.Port) + "/Inference"
 			out, err := json.Marshal(body)
 			r, err := http.NewRequestWithContext(ctx, "POST", endpoint, bytes.NewBuffer(out))
@@ -382,14 +385,15 @@ func queryMiners(wg *sync.WaitGroup, c echo.Context, client *redis.Client, sourc
 				log.Printf("Failed miner request: %s\n", err.Error())
 				return
 			}
-
+			r.Close = true
 			r.Header["Content-Type"] = []string{"application/json"}
+			r.Header["Connection"] = []string{"keep-alive"}
 			r.Header["name"] = []string{"Inference"}
 			r.Header["timeout"] = []string{"12.0"}
 			r.Header["bt_header_axon_ip"] = []string{miner.Ip}
 			r.Header["bt_header_axon_port"] = []string{strconv.Itoa(miner.Port)}
 			r.Header["bt_header_axon_hotkey"] = []string{miner.Hotkey}
-			r.Header["bt_header_dendrite_ip"] = []string{IP}
+			r.Header["bt_header_dendrite_ip"] = []string{"10.0.0.1"}
 			r.Header["bt_header_dendrite_version"] = []string{"672"}
 			r.Header["bt_header_dendrite_nonce"] = []string{strconv.Itoa(int(nonce))}
 			r.Header["bt_header_dendrite_uuid"] = []string{INSTANCE_UUID}
@@ -403,6 +407,7 @@ func queryMiners(wg *sync.WaitGroup, c echo.Context, client *redis.Client, sourc
 			res, err := httpClient.Do(r)
 			if err != nil {
 				log.Printf("Miner: %s %s\nError: %s", miner.Hotkey, miner.Coldkey, err.Error())
+				res.Body.Close()
 				return
 			}
 			if res.StatusCode != http.StatusOK {
@@ -414,22 +419,21 @@ func queryMiners(wg *sync.WaitGroup, c echo.Context, client *redis.Client, sourc
 			axon_version := res.Header.Get("Bt_header_axon_version")
 			ver, err := strconv.Atoi(axon_version)
 			if err != nil || ver < 672 {
-				bdy, _ := io.ReadAll(res.Body)
 				res.Body.Close()
-				log.Printf("Miner: %s %s\nError: %s", miner.Hotkey, miner.Coldkey, string(bdy))
+				log.Printf("Miner: %s %s\nError: Axon version too low", miner.Hotkey, miner.Coldkey)
 				return
 			}
 			response <- res
 		}(m)
 	}
-
+	count := 0
 	for {
+		count++
 		res, ok := <-response
+		log.Printf("Attempt: %d\n", count)
 		if !ok {
-			c.Response().WriteHeader(http.StatusInternalServerError)
 			return
 		}
-		defer res.Body.Close()
 		reader := bufio.NewReader(res.Body)
 		finished := false
 		ans := ""
@@ -443,6 +447,8 @@ func queryMiners(wg *sync.WaitGroup, c echo.Context, client *redis.Client, sourc
 			}
 			ans += token
 			if err != nil && err != io.EOF {
+				ans = ""
+				log.Println(err.Error())
 				break
 			}
 			sendEvent(c, map[string]any{
@@ -454,6 +460,7 @@ func queryMiners(wg *sync.WaitGroup, c echo.Context, client *redis.Client, sourc
 				break
 			}
 		}
+		res.Body.Close()
 		if finished == false {
 			continue
 		}

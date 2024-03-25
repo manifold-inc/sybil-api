@@ -2,6 +2,8 @@ version: '3'
 services:
   searcher:
     scale: 1
+    environment:
+      - DEBUG=true
     labels:
       - traefik.enable=true
       - traefik.http.routers.searcher.rule=Host(`localhost`)

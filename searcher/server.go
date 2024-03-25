@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"os"
+	"strconv"
 	"sync"
 
 	_ "github.com/go-sql-driver/mysql"
@@ -16,7 +18,6 @@ import (
 
 var (
 	HOTKEY        string
-	IP            string
 	PUBLIC_KEY    string
 	PRIVATE_KEY   string
 	NEWS          string
@@ -24,6 +25,7 @@ var (
 	IMAGE         string
 	INSTANCE_UUID string
 	DSN           string
+	DEBUG         bool
 
 	db     *sql.DB
 	client *redis.Client
@@ -31,7 +33,6 @@ var (
 
 func main() {
 	HOTKEY = safeEnv("HOTKEY")
-	IP = safeEnv("EXTERNAL_IP")
 	PUBLIC_KEY = safeEnv("PUBLIC_KEY")
 	PRIVATE_KEY = safeEnv("PRIVATE_KEY")
 	DSN = safeEnv("DSN")
@@ -39,6 +40,12 @@ func main() {
 	SEARCH = "https://google.serper.dev/search"
 	IMAGE = "https://google.serper.dev/images"
 	INSTANCE_UUID = uuid.New().String()
+	debug, present := os.LookupEnv("DEBUG")
+	if !present {
+		DEBUG = false
+	} else {
+		DEBUG, _ = strconv.ParseBool(debug)
+	}
 
 	e := echo.New()
 	client = redis.NewClient(&redis.Options{
