@@ -22,7 +22,6 @@ import (
 	"github.com/ChainSafe/go-schnorrkel"
 	"github.com/aidarkhanov/nanoid"
 	"github.com/google/uuid"
-	"github.com/labstack/echo/v4"
 	"github.com/nitishm/go-rejson/v4"
 	"github.com/redis/go-redis/v9"
 	"golang.org/x/crypto/sha3"
@@ -64,7 +63,7 @@ func signMessage(message string, public string, private string) string {
 	return "0x" + out
 }
 
-func querySerper(query string, endpoint string, page int) (map[string]any, error) {
+func querySerper(c *Context, query string, endpoint string, page int) (map[string]any, error) {
 	SERPER_KEY := safeEnv("SERPER_KEY")
 	body, _ := json.Marshal(map[string]interface{}{
 		"q":    query,
@@ -72,7 +71,7 @@ func querySerper(query string, endpoint string, page int) (map[string]any, error
 	})
 	r, err := http.NewRequest("POST", endpoint, bytes.NewBuffer(body))
 	if err != nil {
-		log.Printf("Serper Error: %s", err.Error())
+		log.Printf("Serper Error: %s\n", err.Error())
 		return nil, err
 	}
 	defer r.Body.Close()
@@ -81,12 +80,12 @@ func querySerper(query string, endpoint string, page int) (map[string]any, error
 	client := &http.Client{}
 	res, err := client.Do(r)
 	if err != nil {
-		log.Printf("Serper Error: %s", err.Error())
+		c.Err.Printf("Serper Error: %s\n", err.Error())
 		return nil, err
 	}
 	defer res.Body.Close()
 	if res.StatusCode != http.StatusOK {
-		log.Printf("Serper Error. Status code: %d", res.StatusCode)
+		c.Err.Printf("Serper Error. Status code: %d\n", res.StatusCode)
 		return nil, errors.New("Serper Failed")
 	}
 	resp := map[string]any{}
@@ -123,7 +122,7 @@ func formatListToPythonString(list []string) string {
 	return strList
 }
 
-func sendEvent(c echo.Context, data any) {
+func sendEvent(c *Context, data any) {
 	eventId := uuid.New().String()
 	fmt.Fprintf(c.Response(), "id: %s\n", eventId)
 	fmt.Fprintf(c.Response(), "event: new_message\n")
@@ -160,9 +159,9 @@ func parseSources(search map[string]any) []SerperResults {
 	return sources
 }
 
-func querySearch(wg *sync.WaitGroup, c echo.Context, query string, src chan []string, page int) {
+func querySearch(wg *sync.WaitGroup, c *Context, query string, src chan []string, page int) {
 	defer wg.Done()
-	search, err := querySerper(query, SEARCH, page)
+	search, err := querySerper(c, query, SEARCH, page)
 	if err != nil {
 		close(src)
 		return
@@ -198,9 +197,9 @@ func querySearch(wg *sync.WaitGroup, c echo.Context, query string, src chan []st
 	})
 }
 
-func queryNews(wg *sync.WaitGroup, c echo.Context, query string) {
+func queryNews(wg *sync.WaitGroup, c *Context, query string) {
 	defer wg.Done()
-	newsResults, err := querySerper(query, NEWS, 1)
+	newsResults, err := querySerper(c,query, NEWS, 1)
 	if err != nil {
 		return
 	}
@@ -240,9 +239,9 @@ func queryNews(wg *sync.WaitGroup, c echo.Context, query string) {
 		})
 	}
 }
-func queryImages(wg *sync.WaitGroup, c echo.Context, query string) {
+func queryImages(wg *sync.WaitGroup, c *Context, query string) {
 	defer wg.Done()
-	imageResults, err := querySerper(query, IMAGE, 1)
+	imageResults, err := querySerper(c,query, IMAGE, 1)
 	if err != nil {
 		return
 	}
@@ -269,7 +268,7 @@ func queryImages(wg *sync.WaitGroup, c echo.Context, query string) {
 	}
 }
 
-func queryMiners(wg *sync.WaitGroup, c echo.Context, client *redis.Client, sources chan []string, query string, answer chan string) {
+func queryMiners(wg *sync.WaitGroup, c *Context, client *redis.Client, sources chan []string, query string, answer chan string) {
 	defer close(answer)
 	defer wg.Done()
 	ctx := context.Background()
@@ -278,14 +277,14 @@ func queryMiners(wg *sync.WaitGroup, c echo.Context, client *redis.Client, sourc
 	rh.SetGoRedisClientWithContext(ctx, client)
 	minerJSON, err := rh.JSONGet("miners", ".")
 	if err != nil {
-		log.Printf("Failed to JSONGet: %s", err.Error())
+		c.Err.Printf("Failed to JSONGet: %s\n", err.Error())
 		return
 	}
 
 	var minerOut []Miner
 	err = json.Unmarshal(minerJSON.([]byte), &minerOut)
 	if err != nil {
-		log.Printf("Failed to JSON Unmarshal: %s", err.Error())
+		c.Err.Printf("Failed to JSON Unmarshal: %s\n", err.Error())
 		return
 	}
 
@@ -301,7 +300,13 @@ func queryMiners(wg *sync.WaitGroup, c echo.Context, client *redis.Client, sourc
 	hashes = append(hashes, hashString(query))
 	bodyHash := hashString(strings.Join(hashes, ""))
 
-	response := make(chan *http.Response)
+	type Response struct {
+		Res     *http.Response
+		ColdKey string
+		HotKey  string
+	}
+
+	response := make(chan Response)
 
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -312,8 +317,8 @@ func queryMiners(wg *sync.WaitGroup, c echo.Context, client *redis.Client, sourc
 		close(response)
 	}()
 	tr := &http.Transport{
-		MaxIdleConns:       10,
-		IdleConnTimeout:    30 * time.Second,
+		MaxIdleConns:      10,
+		IdleConnTimeout:   30 * time.Second,
 		DisableKeepAlives: false,
 	}
 	httpClient := http.Client{Transport: tr}
@@ -383,7 +388,7 @@ func queryMiners(wg *sync.WaitGroup, c echo.Context, client *redis.Client, sourc
 			out, err := json.Marshal(body)
 			r, err := http.NewRequestWithContext(ctx, "POST", endpoint, bytes.NewBuffer(out))
 			if err != nil {
-				log.Printf("Failed miner request: %s\n", err.Error())
+				c.Warn.Printf("Failed miner request: %s\n", err.Error())
 				return
 			}
 			r.Close = true
@@ -407,35 +412,35 @@ func queryMiners(wg *sync.WaitGroup, c echo.Context, client *redis.Client, sourc
 			r.Header["computed_body_hash"] = []string{bodyHash}
 			res, err := httpClient.Do(r)
 			if err != nil {
-				log.Printf("Miner: %s %s\nError: %s", miner.Hotkey, miner.Coldkey, err.Error())
+				c.Warn.Printf("Miner: %s %s\nError: %s\n", miner.Hotkey, miner.Coldkey, err.Error())
 				res.Body.Close()
 				return
 			}
 			if res.StatusCode != http.StatusOK {
 				bdy, _ := io.ReadAll(res.Body)
 				res.Body.Close()
-				log.Printf("Miner: %s %s\nError: %s", miner.Hotkey, miner.Coldkey, string(bdy))
+				c.Warn.Printf("Miner: %s %s\nError: %s\n", miner.Hotkey, miner.Coldkey, string(bdy))
 				return
 			}
 			axon_version := res.Header.Get("Bt_header_axon_version")
 			ver, err := strconv.Atoi(axon_version)
 			if err != nil || ver < 672 {
 				res.Body.Close()
-				log.Printf("Miner: %s %s\nError: Axon version too low", miner.Hotkey, miner.Coldkey)
+				c.Warn.Printf("Miner: %s %s\nError: Axon version too low\n", miner.Hotkey, miner.Coldkey)
 				return
 			}
-			response <- res
+			response <- Response{Res: res, ColdKey: miner.Coldkey, HotKey: miner.Hotkey}
 		}(m)
 	}
 	count := 0
 	for {
 		count++
 		res, ok := <-response
-		log.Printf("Attempt: %d\n", count)
+		c.Info.Printf("Attempt: %d Miner: %s %s\n", count, res.HotKey, res.ColdKey)
 		if !ok {
 			return
 		}
-		reader := bufio.NewReader(res.Body)
+		reader := bufio.NewReader(res.Res.Body)
 		finished := false
 		ans := ""
 		for {
@@ -449,7 +454,7 @@ func queryMiners(wg *sync.WaitGroup, c echo.Context, client *redis.Client, sourc
 			ans += token
 			if err != nil && err != io.EOF {
 				ans = ""
-				log.Println(err.Error())
+				c.Err.Println(err.Error())
 				break
 			}
 			sendEvent(c, map[string]any{
@@ -461,7 +466,7 @@ func queryMiners(wg *sync.WaitGroup, c echo.Context, client *redis.Client, sourc
 				break
 			}
 		}
-		res.Body.Close()
+		res.Res.Body.Close()
 		if finished == false {
 			continue
 		}
@@ -475,7 +480,7 @@ func queryMiners(wg *sync.WaitGroup, c echo.Context, client *redis.Client, sourc
 				response = nil
 				break
 			}
-			res.Body.Close()
+			res.Res.Body.Close()
 		}
 		if response == nil {
 			break
@@ -483,10 +488,10 @@ func queryMiners(wg *sync.WaitGroup, c echo.Context, client *redis.Client, sourc
 	}
 }
 
-func saveAnswer(c echo.Context, query string, answer chan string, sources chan []string, session string) {
+func saveAnswer(c *Context, query string, answer chan string, sources chan []string, session string) {
 	publicId, err := nanoid.Generate("0123456789abcdefghijklmnopqrstuvwxyz", 29)
 	if err != nil {
-		log.Println("Failed generating publicId for db:", err)
+		c.Err.Println("Failed generating publicId for db:", err)
 		return
 	}
 	publicId = "sh_" + publicId
@@ -502,27 +507,27 @@ func saveAnswer(c echo.Context, query string, answer chan string, sources chan [
 			AND session.expires_at > CURRENT_TIMESTAMP()
 		`, session).Scan(&userId)
 		if err != nil && err != sql.ErrNoRows {
-			log.Println("Get userId Error: ", err)
+			c.Warn.Println("Get userId Error: ", err)
 			return
 		}
 	}
 
 	ans, more := <-answer
 	if !more {
-		log.Println("Faield to get answer")
+		c.Warn.Println("Faield to get answer")
 		return
 	}
 	srcs, more := <-sources
 	if !more {
-		log.Println("Faield to get sources")
+		c.Warn.Println("Faield to get sources")
 		return
 	}
 	jsonSrcs, _ := json.Marshal(srcs)
 	q := `INSERT INTO search (public_id, user_iid, query, sources, completion) VALUES (?, ?, ?, ?, ?);`
 	_, err = db.Exec(q, publicId, userId, query, string(jsonSrcs), ans)
 	if err != nil && err != sql.ErrNoRows {
-		log.Println("Insert Search Error:", err)
+		c.Err.Printf("Error: %s\n", err)
 		return
 	}
-	log.Println("Inserted into db")
+	c.Info.Println("Inserted Results")
 }
