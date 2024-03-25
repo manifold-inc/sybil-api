@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -86,7 +87,7 @@ func querySerper(query string, endpoint string, page int) (map[string]any, error
 	defer res.Body.Close()
 	if res.StatusCode != http.StatusOK {
 		log.Printf("Serper Error. Status code: %d", res.StatusCode)
-		return nil, err
+		return nil, errors.New("Serper Failed")
 	}
 	resp := map[string]any{}
 	json.NewDecoder(res.Body).Decode(&resp)
