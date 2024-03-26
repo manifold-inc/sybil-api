@@ -147,11 +147,23 @@ func parseSources(search map[string]any) []SerperResults {
 		if !ok {
 			date = ""
 		}
+		snippet, ok := element["snippet"].(string)
+		if !ok {
+			snippet = ""
+		}
+		title, ok := element["title"].(string)
+		if !ok {
+			title = ""
+		}
+		link, ok := element["link"].(string)
+		if !ok {
+			link = ""
+		}
 		sources = append(sources, SerperResults{
 			Type:      "url",
-			Url:       element["link"].(string),
-			Snippet:   element["snippet"].(string),
-			Title:     element["title"].(string),
+			Url:       link,
+			Snippet:   snippet,
+			Title:     title,
 			Icon:      icon,
 			Published: date,
 		})
@@ -199,7 +211,7 @@ func querySearch(wg *sync.WaitGroup, c *Context, query string, src chan []string
 
 func queryNews(wg *sync.WaitGroup, c *Context, query string) {
 	defer wg.Done()
-	newsResults, err := querySerper(c,query, NEWS, 1)
+	newsResults, err := querySerper(c, query, NEWS, 1)
 	if err != nil {
 		return
 	}
@@ -241,7 +253,7 @@ func queryNews(wg *sync.WaitGroup, c *Context, query string) {
 }
 func queryImages(wg *sync.WaitGroup, c *Context, query string) {
 	defer wg.Done()
-	imageResults, err := querySerper(c,query, IMAGE, 1)
+	imageResults, err := querySerper(c, query, IMAGE, 1)
 	if err != nil {
 		return
 	}
