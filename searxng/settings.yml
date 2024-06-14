@@ -1,0 +1,18 @@
+# see https://docs.searxng.org/admin/settings/settings.html#settings-use-default-settings
+use_default_settings:
+  engines:
+    remove:
+      - soundcloud
+server:
+  limiter: false
+  secret_key: "f0b44a7474a912df59c5be679bc1fbdecc961c3528f48854e5e8e5dcb0b83ebc"  # change this!
+  image_proxy: true
+  public_instance: false
+ui:
+  static_use_hash: true
+redis:
+  url: redis://searx-cache:6379/0
+search:
+  formats:
+    - json
+    - html

@@ -63,34 +63,27 @@ func signMessage(message string, public string, private string) string {
 	return "0x" + out
 }
 
-func querySerper(c *Context, query string, endpoint string, page int) (map[string]any, error) {
-	SERPER_KEY := safeEnv("SERPER_KEY")
-	body, _ := json.Marshal(map[string]interface{}{
-		"q":    query,
-		"page": page,
+func querySearx(c *Context, query string, categories string, page int) (*SearxResponseBody, error) {
+	res, err := http.PostForm(SEARX_URL + "/search", url.Values{
+		"q":          {query},
+		"format":     {"json"},
+		"page":       {fmt.Sprint(page)},
+		"categories": {categories},
 	})
-	r, err := http.NewRequest("POST", endpoint, bytes.NewBuffer(body))
+
 	if err != nil {
-		log.Printf("Serper Error: %s\n", err.Error())
-		return nil, err
-	}
-	defer r.Body.Close()
-	r.Header["Content-Type"] = []string{"application/json"}
-	r.Header["X-API-KEY"] = []string{SERPER_KEY}
-	client := &http.Client{}
-	res, err := client.Do(r)
-	if err != nil {
-		c.Err.Printf("Serper Error: %s\n", err.Error())
+		log.Printf("Search Error: %s\n", err.Error())
 		return nil, err
 	}
 	defer res.Body.Close()
 	if res.StatusCode != http.StatusOK {
-		c.Err.Printf("Serper Error. Status code: %d\n", res.StatusCode)
-		return nil, errors.New("Serper Failed")
+		c.Err.Printf("Search Error. Status code: %d\n", res.StatusCode)
+		return nil, errors.New("Search Failed")
 	}
-	resp := map[string]any{}
+
+	var resp SearxResponseBody
 	json.NewDecoder(res.Body).Decode(&resp)
-	return resp, nil
+	return &resp, nil
 }
 
 func hashString(str string) string {
@@ -122,7 +115,7 @@ func formatListToPythonString(list []string) string {
 	return strList
 }
 
-func sendEvent(c *Context, data any) {
+func sendEvent(c *Context, data map[string]any) {
 	eventId := uuid.New().String()
 	fmt.Fprintf(c.Response(), "id: %s\n", eventId)
 	fmt.Fprintf(c.Response(), "event: new_message\n")
@@ -132,152 +125,49 @@ func sendEvent(c *Context, data any) {
 	c.Response().Flush()
 }
 
-func parseSources(search map[string]any) []SerperResults {
-	organic_results := search["organic"].([]interface{})
-	sources := []SerperResults{}
-	for _, element := range organic_results {
-		element := element.(map[string]interface{})
-		url, err := url.Parse(element["link"].(string))
-		icon := "https://www.micreate.eu/wp-content/img/default-img.png"
-		if err == nil {
-			hostname := strings.TrimPrefix(url.Hostname(), "www.")
-			icon = fmt.Sprintf("https://www.google.com/s2/favicons?domain=%s&sz=8", hostname)
-		}
-		date, ok := element["date"].(string)
-		if !ok {
-			date = ""
-		}
-		snippet, ok := element["snippet"].(string)
-		if !ok {
-			snippet = ""
-		}
-		title, ok := element["title"].(string)
-		if !ok {
-			title = ""
-		}
-		link, ok := element["link"].(string)
-		if !ok {
-			link = ""
-		}
-		sources = append(sources, SerperResults{
-			Type:      "url",
-			Url:       link,
-			Snippet:   snippet,
-			Title:     title,
-			Icon:      icon,
-			Published: date,
-		})
-	}
-	return sources
-}
-
 func querySearch(wg *sync.WaitGroup, c *Context, query string, src chan []string, page int) {
 	defer wg.Done()
-	search, err := querySerper(c, query, SEARCH, page)
+	search, err := querySearx(c, query, "general", page)
 	if err != nil {
 		close(src)
 		return
 	}
-	sources := parseSources(search)
 
 	sendEvent(c, map[string]any{
 		"type":    "sources",
-		"sources": sources,
+		"sources": search.Results,
 	})
 	var llmSources []string
-	for _, element := range sources {
-		llmSources = append(llmSources, fmt.Sprintf("Title: %s:\nSnippet: %s\n", element.Title, element.Snippet))
+	for _, element := range search.Results {
+		llmSources = append(llmSources, fmt.Sprintf("Title: %s:\nSnippet: %s\n", *element.Title, *element.Content))
 	}
 	src <- llmSources
 	src <- llmSources
 
-	relatedSearches, ok := search["relatedSearches"]
-	if !ok {
-		sendEvent(c, map[string]any{
-			"type":      "related",
-			"followups": []string{},
-		})
-		return
-	}
-	var relatedList []string
-	for _, element := range relatedSearches.([]interface{}) {
-		relatedList = append(relatedList, element.(map[string]interface{})["query"].(string))
-	}
 	sendEvent(c, map[string]any{
 		"type":      "related",
-		"followups": relatedList,
+		"followups": search.Suggestions,
 	})
 }
 
 func queryNews(wg *sync.WaitGroup, c *Context, query string) {
 	defer wg.Done()
-	newsResults, err := querySerper(c, query, NEWS, 1)
+	results, err := querySearx(c, query, "news", 1)
 	if err != nil {
 		return
 	}
-	news := newsResults["news"].([]interface{})
-	if len(news) > 0 {
-		herocard := news[0].(map[string]interface{})
-		link, ok := herocard["link"]
-		if !ok {
-			sendEvent(c, map[string]any{
-				"type":     "heroCard",
-				"heroCard": nil,
-			})
-			return
-		}
-		image, ok := herocard["imageUrl"]
-		if !ok {
-			image = "https://img.freepik.com/premium-vector/beautiful-colorful-gradient-background_492281-1165.jpg"
-		}
-		snippet, ok := herocard["snippet"]
-		if !ok {
-			snippet = "Top Result from search"
-		}
-		title, ok := herocard["title"]
-		if !ok {
-			title = "Top Result"
-		}
-		sendEvent(c, map[string]any{
-			"type": "heroCard",
-			"heroCard": map[string]string{
-				"type":  "news",
-				"url":   link.(string),
-				"image": image.(string),
-				"title": title.(string),
-				"intro": snippet.(string),
-				"size":  "auto",
-			},
-		})
-	}
-}
-func queryImages(wg *sync.WaitGroup, c *Context, query string) {
-	defer wg.Done()
-	imageResults, err := querySerper(c, query, IMAGE, 1)
-	if err != nil {
-		return
-	}
-	images := imageResults["images"].([]interface{})
-	if len(images) > 0 {
-		var results []map[string]interface{}
-		for i, v := range images {
-			if i == 4 {
-				break
-			}
-			v := v.(map[string]interface{})
-			results = append(results, map[string]interface{}{
-				"type":    "image",
-				"url":     v["imageUrl"].(string),
-				"source":  v["link"],
-				"version": 1,
-				"size":    "auto",
-			})
-		}
-		sendEvent(c, map[string]any{
-			"type":  "cards",
-			"cards": images,
-		})
-	}
+	herocard := results.Results[0]
+	sendEvent(c, map[string]any{
+		"type": "heroCard",
+		"heroCard": map[string]any{
+			"type":  "news",
+			"url":   *herocard.Url,
+			"image": herocard.Thumbnail,
+			"title": *herocard.Title,
+			"intro": *herocard.Content,
+			"size":  "auto",
+		},
+	})
 }
 
 func queryMiners(wg *sync.WaitGroup, c *Context, client *redis.Client, sources chan []string, query string, answer chan string) {

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"strconv"
 	"sync"
@@ -22,9 +23,7 @@ var (
 	HOTKEY        string
 	PUBLIC_KEY    string
 	PRIVATE_KEY   string
-	NEWS          string
-	SEARCH        string
-	IMAGE         string
+	SEARX_URL     string
 	INSTANCE_UUID string
 	DSN           string
 	DEBUG         bool
@@ -55,9 +54,7 @@ func main() {
 	PUBLIC_KEY = safeEnv("PUBLIC_KEY")
 	PRIVATE_KEY = safeEnv("PRIVATE_KEY")
 	DSN = safeEnv("DSN")
-	NEWS = "https://google.serper.dev/news"
-	SEARCH = "https://google.serper.dev/search"
-	IMAGE = "https://google.serper.dev/images"
+	SEARX_URL = "http://searxng:8080/"
 	INSTANCE_UUID = uuid.New().String()
 	debug, present := os.LookupEnv("DEBUG")
 	if !present {
@@ -78,7 +75,7 @@ func main() {
 		}
 	})
 	client = redis.NewClient(&redis.Options{
-		Addr:     "cache:6379",
+		Addr:     "mcacher-cache:6379",
 		Password: "",
 		DB:       0,
 	})
@@ -117,7 +114,7 @@ func main() {
 		c.Response().Header().Set("X-Accel-Buffering", "no")
 
 		cc.Info.Printf("/search: %s\n", query)
-		sources := make(chan []string)
+		sources := make(chan []string, 2)
 		answer := make(chan string)
 		var wg sync.WaitGroup
 		wg.Add(3)
@@ -127,7 +124,28 @@ func main() {
 		go queryMiners(&wg, cc, client, sources, query, answer)
 		go saveAnswer(cc, query, answer, sources, c.Request().Header.Get("X-SESSION-ID"))
 		wg.Wait()
+		fmt.Println("----- DONE ------")
 		return c.String(200, "")
+	})
+	e.GET("/autocomplete", func(c echo.Context) error {
+		query := c.Param("q")
+		res, err := http.PostForm(SEARX_URL+"/autocompleter", url.Values{
+			"q": {query},
+		})
+
+		if err != nil {
+			log.Printf("Search Error: %s\n", err.Error())
+			return c.String(500, "Search Failed")
+		}
+		defer res.Body.Close()
+		if res.StatusCode != http.StatusOK {
+			log.Printf("Search Error: %x\n", res.StatusCode)
+			return c.String(500, "Search failed")
+		}
+		var resp []string
+		json.NewDecoder(res.Body).Decode(&resp)
+		fmt.Println(resp)
+		return c.JSON(200, resp)
 	})
 	e.POST("/search/sources", func(c echo.Context) error {
 		cc := c.(*Context)
@@ -142,12 +160,11 @@ func main() {
 			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 		}
 		cc.Info.Printf("/search/sources: %s, page: %d\n", query, requestBody.Page)
-		search, err := querySerper(cc, query, SEARCH, requestBody.Page)
+		search, err := querySearx(cc, query, "general", requestBody.Page)
 		if err != nil {
 			return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 		}
-		sources := parseSources(search)
-		return c.JSON(200, sources)
+		return c.JSON(200, search.Results)
 	})
 	e.Logger.Fatal(e.Start(":80"))
 }

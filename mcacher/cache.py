@@ -3,10 +3,11 @@ from typing import List, Tuple
 import bittensor as bt
 from redis import Redis
 from redis.commands.json.path import Path
+import torch
 
 
 async def sync_miners(n: int):
-    indices = bt.torch.topk(metagraph.incentive, n).indices
+    indices = torch.topk(torch.Tensor(metagraph.incentive), n).indices
 
     # Get the corresponding uids
     uids_with_highest_incentives: List[int] = metagraph.uids[indices].tolist()
@@ -16,7 +17,13 @@ async def sync_miners(n: int):
         (metagraph.axons[uid], uid) for uid in uids_with_highest_incentives
     ]
     ips = [
-            {"ip": axon.ip, "port": axon.port, "hotkey": axon.hotkey, "coldkey": axon.coldkey} for (axon, _) in axons
+        {
+            "ip": axon.ip,
+            "port": axon.port,
+            "hotkey": axon.hotkey,
+            "coldkey": axon.coldkey,
+        }
+        for (axon, _) in axons
     ]
     print("Saving new miners to cache", flush=True)
     r.json().set("miners", obj=ips, path=Path.root_path())
@@ -26,6 +33,6 @@ async def sync_miners(n: int):
 if __name__ == "__main__":
     subtensor = bt.subtensor("ws://subtensor.sybil.com:9944")
     metagraph: bt.metagraph = subtensor.metagraph(netuid=4)
-    r = Redis(host="cache", port=6379, decode_responses=True)
+    r = Redis(host="mcacher-cache", port=6379, decode_responses=True)
     while True:
         asyncio.run(sync_miners(10))

@@ -14,8 +14,8 @@ build opts = "":
 pull:
   @git pull
 
-up: build
-  docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
+up extra='': build
+  docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --force-recreate {{extra}}
   @printf " {{GREEN}}{{CHECK}} Images Started {{CHECK}} {{RESET}}"
 
 prod: build

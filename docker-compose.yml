@@ -1,4 +1,3 @@
-version: '3'
 services:
   searcher:
     scale: 3
@@ -13,7 +12,7 @@ services:
       context: ./searcher
     restart: always
     depends_on:
-      cache:
+      mcacher-cache:
         condition: service_healthy
 
   mcacher:
@@ -21,10 +20,10 @@ services:
       context: ./mcacher
     restart: always
     depends_on:
-      cache:
+      mcacher-cache:
         condition: service_healthy
 
-  cache:
+  mcacher-cache:
     image: redis/redis-stack-server:latest
     restart: always
     healthcheck:
@@ -32,6 +31,37 @@ services:
       interval: "3s"
     volumes: 
       - cache:/data
+
+  searxng:
+    image: docker.io/searxng/searxng:latest
+    restart: always
+    volumes:
+      - ./searxng:/etc/searxng:rw
+    environment:
+      - SEARXNG_BASE_URL=http://localhost:8080/
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "1m"
+        max-file: "1"
+
+  searx-cache:
+    image: docker.io/valkey/valkey:7-alpine
+    command: valkey-server --save 30 1 --loglevel warning
+    restart: always
+    volumes:
+      - searx-data:/data
+    cap_drop:
+      - ALL
+    cap_add:
+      - SETGID
+      - SETUID
+      - DAC_OVERRIDE
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "1m"
+        max-file: "1"
 
   traefik:
     image: traefik:v2.3
@@ -46,5 +76,6 @@ services:
 
 volumes:
   traefik-public-certificates:
+  searx-data:
   cache:
     driver: local

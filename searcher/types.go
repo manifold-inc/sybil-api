@@ -53,14 +53,23 @@ type SamplingParams struct {
 	Truncate            *string  `json:"truncate"`
 }
 
-type SerperResults struct {
-	Type      string `json:"type"`
-	Url       string `json:"url"`
-	Snippet   string `json:"snippet"`
-	Title     string `json:"title"`
-	Icon      string `json:"icon"`
-	Published string `json:"published"`
+type SearxResults struct {
+	Url           *string `json:"url,omitempty"`
+	Title         *string `json:"title,omitempty"`
+	Content       *string `json:"content,omitempty"`
+	Thumbnail     *string `json:"thumbnail,omitempty"`
+	ParsedUrl     *[]string `json:"parsed_url,omitempty"`
+	Metadata      *string `json:"metadata,omitempty"`
+	PublishedDate *string `json:"publishedDate,omitempty"`
 }
+
+type SearxResponseBody struct {
+	Query             string         `json:"query"`
+	Number_of_results int            `json:"number_of_results"`
+	Results           []SearxResults `json:"results,omitempty"`
+	Suggestions       []string       `json:"suggestions,omitempty"`
+}
+
 type Event struct {
 	Event string                 `json:"event"`
 	Id    string                 `json:"id"`
