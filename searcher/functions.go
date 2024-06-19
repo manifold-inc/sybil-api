@@ -72,7 +72,7 @@ func querySearx(c *Context, query string, categories string, page int) (*SearxRe
 	})
 
 	if err != nil {
-		log.Printf("Search Error: %s\n", err.Error())
+		c.Err.Printf("Search Error: %s\n", err.Error())
 		return nil, err
 	}
 	defer res.Body.Close()
@@ -180,6 +180,9 @@ func queryMiners(wg *sync.WaitGroup, c *Context, client *redis.Client, sources c
 	minerJSON, err := rh.JSONGet("miners", ".")
 	if err != nil {
 		c.Err.Printf("Failed to JSONGet: %s\n", err.Error())
+		return
+	}
+	if DEBUG {
 		return
 	}
 

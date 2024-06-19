@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"net/url"
 	"os"
 	"strconv"
 	"sync"
@@ -124,14 +123,17 @@ func main() {
 		go queryMiners(&wg, cc, client, sources, query, answer)
 		go saveAnswer(cc, query, answer, sources, c.Request().Header.Get("X-SESSION-ID"))
 		wg.Wait()
-		fmt.Println("----- DONE ------")
 		return c.String(200, "")
 	})
 	e.GET("/autocomplete", func(c echo.Context) error {
-		query := c.Param("q")
-		res, err := http.PostForm(SEARX_URL+"/autocompleter", url.Values{
-			"q": {query},
-		})
+		client := &http.Client{}
+		query := c.QueryParam("q")
+		req, err := http.NewRequest(http.MethodGet, SEARX_URL+"/autocompleter", nil)
+		q := req.URL.Query()
+		q.Add("q", query)
+		req.URL.RawQuery = q.Encode()
+
+		res, err := client.Do(req)
 
 		if err != nil {
 			log.Printf("Search Error: %s\n", err.Error())
@@ -142,9 +144,8 @@ func main() {
 			log.Printf("Search Error: %x\n", res.StatusCode)
 			return c.String(500, "Search failed")
 		}
-		var resp []string
+		var resp []interface{}
 		json.NewDecoder(res.Body).Decode(&resp)
-		fmt.Println(resp)
 		return c.JSON(200, resp)
 	})
 	e.POST("/search/sources", func(c echo.Context) error {
