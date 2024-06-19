@@ -93,7 +93,6 @@ func main() {
 		cc := c.(*Context)
 		type RequestBody struct {
 			Query string   `json:"query"`
-			Files []string `json:"files"`
 		}
 		cc.Request().Header.Add("Content-Type", "application/json")
 		var requestBody RequestBody

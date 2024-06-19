@@ -35,4 +35,4 @@ if __name__ == "__main__":
     metagraph: bt.metagraph = subtensor.metagraph(netuid=4)
     r = Redis(host="mcacher-cache", port=6379, decode_responses=True)
     while True:
-        asyncio.run(sync_miners(10))
+        asyncio.run(sync_miners(4))

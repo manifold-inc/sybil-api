@@ -8,19 +8,6 @@ type MinerResponse struct {
 	HotKey  string
 }
 
-type RequestBodyMessages struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
-	Name    string `json:"name"`
-}
-
-type RequestBody struct {
-	Model     string                `json:"model"`
-	Messages  []RequestBodyMessages `json:"messages"`
-	ApiKey    string                `json:"api_key"`
-	MaxTokens int                   `json:"max_tokens"`
-}
-
 type Miner struct {
 	Ip      string `json:"ip,omitempty"`
 	Port    int    `json:"port,omitempty"`

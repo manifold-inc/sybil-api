@@ -209,7 +209,6 @@ func queryMiners(wg *sync.WaitGroup, c *Context, sources chan []string, query st
 		return
 	}
 
-	ctx := c.Request().Context()
 
 	llm_sources, more := <-sources
 	if !more {
@@ -223,23 +222,32 @@ func queryMiners(wg *sync.WaitGroup, c *Context, sources chan []string, query st
 
 	response := make(chan MinerResponse)
 
-	warn := c.Warn
 	var minerWaitGroup sync.WaitGroup
 	minerWaitGroup.Add(len(miners))
+
 	go func() {
 		minerWaitGroup.Wait()
 		close(response)
 	}()
+
 	tr := &http.Transport{
 		MaxIdleConns:      10,
 		IdleConnTimeout:   30 * time.Second,
 		DisableKeepAlives: false,
 	}
-	nonce := time.Now().UnixNano()
+
 	httpClient := http.Client{Transport: tr}
+
+	nonce := time.Now().UnixNano()
+
+	ctx := c.Request().Context()
+
+	warn := c.Warn
+
 	for _, m := range miners {
 		go func(miner Miner) {
 			defer minerWaitGroup.Done()
+
 			message := []string{fmt.Sprint(nonce), HOTKEY, miner.Hotkey, INSTANCE_UUID, bodyHash}
 			joinedMessage := strings.Join(message, ".")
 			signedMessage := signMessage(joinedMessage, PUBLIC_KEY, PRIVATE_KEY)
@@ -339,6 +347,7 @@ func queryMiners(wg *sync.WaitGroup, c *Context, sources chan []string, query st
 				warn.Printf("Miner: %s %s\nError: %s\n", miner.Hotkey, miner.Coldkey, string(bdy))
 				return
 			}
+
 			axon_version := res.Header.Get("Bt_header_axon_version")
 			ver, err := strconv.Atoi(axon_version)
 			if err != nil || ver < 672 {
