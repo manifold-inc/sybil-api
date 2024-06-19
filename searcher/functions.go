@@ -147,8 +147,11 @@ func querySearch(wg *sync.WaitGroup, c *Context, query string, src chan []string
 		"sources": search.Results,
 	})
 	var llmSources []string
-	for _, element := range search.Results {
+	for i, element := range search.Results {
 		llmSources = append(llmSources, fmt.Sprintf("Title: %s:\nSnippet: %s\n", *element.Title, *element.Content))
+		if i == 4 {
+			break
+		}
 	}
 	sendEvent(c, map[string]any{
 		"type":      "related",
@@ -243,7 +246,7 @@ func queryMiners(wg *sync.WaitGroup, c *Context, sources chan []string, query st
 
 	warn := c.Warn
 
-	for index, m := range miners {
+	for _, m := range miners {
 		go func(miner Miner) {
 			defer minerWaitGroup.Done()
 
@@ -308,10 +311,6 @@ func queryMiners(wg *sync.WaitGroup, c *Context, sources chan []string, query st
 
 			endpoint := "http://" + miner.Ip + ":" + fmt.Sprint(miner.Port) + "/Inference"
 			out, err := json.Marshal(body)
-			if index == 1 {
-				forlog, _ := json.MarshalIndent(body, "", "    ")
-				warn.Println(string(forlog))
-			}
 			r, err := http.NewRequestWithContext(ctx, "POST", endpoint, bytes.NewBuffer(out))
 			if err != nil {
 				warn.Printf("Failed miner request: %s\n", err.Error())
@@ -344,12 +343,6 @@ func queryMiners(wg *sync.WaitGroup, c *Context, sources chan []string, query st
 				if res != nil {
 					res.Body.Close()
 				}
-				return
-			}
-			if res.StatusCode == http.StatusOK {
-				bdy, _ := io.ReadAll(res.Body)
-				res.Body.Close()
-				warn.Printf("Miner: %s %s\nError: %s\n", miner.Hotkey, miner.Coldkey, string(bdy))
 				return
 			}
 			if res.StatusCode != http.StatusOK {
