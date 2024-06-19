@@ -263,7 +263,7 @@ func queryMiners(wg *sync.WaitGroup, c *Context, sources chan []string, query st
 				Query:          query,
 				BodyHash:       "",
 				Dendrite: DendriteOrAxon{
-					Ip:            "0.0.0.0",
+					Ip:            "10.0.0.1",
 					Version:       &version,
 					Nonce:         &nonce,
 					Uuid:          &INSTANCE_UUID,
@@ -309,6 +309,8 @@ func queryMiners(wg *sync.WaitGroup, c *Context, sources chan []string, query st
 
 			endpoint := "http://" + miner.Ip + ":" + fmt.Sprint(miner.Port) + "/Inference"
 			out, err := json.Marshal(body)
+			forlog, _ := json.MarshalIndent(body, "", "    ")
+			warn.Println(forlog)
 			r, err := http.NewRequestWithContext(ctx, "POST", endpoint, bytes.NewBuffer(out))
 			if err != nil {
 				warn.Printf("Failed miner request: %s\n", err.Error())
