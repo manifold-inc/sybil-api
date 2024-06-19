@@ -87,6 +87,7 @@ func main() {
 		log.Fatalf("failed to ping: %v", err)
 	}
 	defer db.Close()
+	defer client.Close()
 
 	e.POST("/search", func(c echo.Context) error {
 		cc := c.(*Context)
@@ -113,15 +114,14 @@ func main() {
 		c.Response().Header().Set("X-Accel-Buffering", "no")
 
 		cc.Info.Printf("/search: %s\n", query)
-		sources := make(chan []string, 2)
+		sources := make(chan []string)
 		answer := make(chan string)
 		var wg sync.WaitGroup
 		wg.Add(3)
 		go querySearch(&wg, cc, query, sources, 0)
 		go queryNews(&wg, cc, query)
-		//go queryImages(&wg, c, query)
 		go queryMiners(&wg, cc, client, sources, query, answer)
-		go saveAnswer(cc, query, answer, sources, c.Request().Header.Get("X-SESSION-ID"))
+		go saveAnswer(query, answer, sources, c.Request().Header.Get("X-SESSION-ID"))
 		wg.Wait()
 		return c.String(200, "")
 	})
