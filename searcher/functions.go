@@ -66,7 +66,7 @@ func signMessage(message string, public string, private string) string {
 }
 
 func querySearx(c *Context, query string, categories string, page int) (*SearxResponseBody, error) {
-	res, err := http.PostForm(SEARX_URL + "/search", url.Values{
+	res, err := http.PostForm(SEARX_URL+"/search", url.Values{
 		"q":          {query},
 		"format":     {"json"},
 		"page":       {fmt.Sprint(page)},
@@ -209,7 +209,6 @@ func queryMiners(wg *sync.WaitGroup, c *Context, sources chan []string, query st
 		return
 	}
 
-
 	llm_sources, more := <-sources
 	if !more {
 		return
@@ -244,7 +243,7 @@ func queryMiners(wg *sync.WaitGroup, c *Context, sources chan []string, query st
 
 	warn := c.Warn
 
-	for _, m := range miners {
+	for index, m := range miners {
 		go func(miner Miner) {
 			defer minerWaitGroup.Done()
 
@@ -309,8 +308,10 @@ func queryMiners(wg *sync.WaitGroup, c *Context, sources chan []string, query st
 
 			endpoint := "http://" + miner.Ip + ":" + fmt.Sprint(miner.Port) + "/Inference"
 			out, err := json.Marshal(body)
-			forlog, _ := json.MarshalIndent(body, "", "    ")
-			warn.Println(forlog)
+			if index == 1 {
+				forlog, _ := json.MarshalIndent(body, "", "    ")
+				warn.Println(forlog)
+			}
 			r, err := http.NewRequestWithContext(ctx, "POST", endpoint, bytes.NewBuffer(out))
 			if err != nil {
 				warn.Printf("Failed miner request: %s\n", err.Error())
