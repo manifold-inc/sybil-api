@@ -3,7 +3,6 @@ package main
 import (
 	"bufio"
 	"bytes"
-	"context"
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
@@ -198,7 +197,7 @@ func getTopMiners(c *Context) []Miner {
 	return miners
 }
 
-func queryMiners(wg *sync.WaitGroup, c *Context, client *redis.Client, sources chan []string, query string, answer chan string) {
+func queryMiners(wg *sync.WaitGroup, c *Context, sources chan []string, query string, answer chan string) {
 	defer close(answer)
 	defer wg.Done()
 
@@ -212,8 +211,6 @@ func queryMiners(wg *sync.WaitGroup, c *Context, client *redis.Client, sources c
 	}
 
 	ctx := c.Request().Context()
-
-	nonce := time.Now().UnixNano()
 
 	llm_sources, more := <-sources
 	if !more {
@@ -239,6 +236,7 @@ func queryMiners(wg *sync.WaitGroup, c *Context, client *redis.Client, sources c
 		IdleConnTimeout:   30 * time.Second,
 		DisableKeepAlives: false,
 	}
+	nonce := time.Now().UnixNano()
 	httpClient := http.Client{Transport: tr}
 	for _, m := range miners {
 		go func(miner Miner) {

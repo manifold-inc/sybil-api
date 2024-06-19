@@ -120,7 +120,7 @@ func main() {
 		wg.Add(3)
 		go querySearch(&wg, cc, query, sources, 0)
 		go queryNews(&wg, cc, query)
-		go queryMiners(&wg, cc, client, sources, query, answer)
+		go queryMiners(&wg, cc, sources, query, answer)
 		go saveAnswer(query, answer, sources, c.Request().Header.Get("X-SESSION-ID"))
 		wg.Wait()
 		return c.String(200, "")
