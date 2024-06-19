@@ -336,12 +336,20 @@ func queryMiners(wg *sync.WaitGroup, c *Context, sources chan []string, query st
 			r.Header["header_size"] = []string{"0"}
 			r.Header["total_size"] = []string{"0"}
 			r.Header["computed_body_hash"] = []string{bodyHash}
+			r.Header.Add("Accept-Encoding", "identity")
+
 			res, err := httpClient.Do(r)
 			if err != nil {
 				warn.Printf("Miner: %s %s\nError: %s\n", miner.Hotkey, miner.Coldkey, err.Error())
 				if res != nil {
 					res.Body.Close()
 				}
+				return
+			}
+			if res.StatusCode == http.StatusOK {
+				bdy, _ := io.ReadAll(res.Body)
+				res.Body.Close()
+				warn.Printf("Miner: %s %s\nError: %s\n", miner.Hotkey, miner.Coldkey, string(bdy))
 				return
 			}
 			if res.StatusCode != http.StatusOK {
