@@ -310,7 +310,7 @@ func queryMiners(wg *sync.WaitGroup, c *Context, sources chan []string, query st
 			out, err := json.Marshal(body)
 			if index == 1 {
 				forlog, _ := json.MarshalIndent(body, "", "    ")
-				warn.Println(forlog)
+				warn.Println(string(forlog))
 			}
 			r, err := http.NewRequestWithContext(ctx, "POST", endpoint, bytes.NewBuffer(out))
 			if err != nil {
