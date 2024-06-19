@@ -22,7 +22,6 @@ import (
 	"github.com/aidarkhanov/nanoid"
 	"github.com/google/uuid"
 	"github.com/nitishm/go-rejson/v4"
-	"github.com/redis/go-redis/v9"
 	"golang.org/x/crypto/sha3"
 )
 
