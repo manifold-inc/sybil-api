@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"math/rand"
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
@@ -15,7 +16,6 @@ import (
 	"os"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/ChainSafe/go-schnorrkel"
@@ -156,6 +156,10 @@ func getTopMiners(c *Context) []Miner {
 		c.Err.Printf("Failed to JSON Unmarshal: %s\n", err.Error())
 		return nil
 	}
+	for i := range miners {
+			j := rand.Intn(i + 1)
+			miners[i], miners[j] = miners[j], miners[i]
+	}
 	return miners
 }
 
@@ -176,16 +180,6 @@ func queryMiners(c *Context, sources []string, query string) string {
 	hashes = append(hashes, sha256Hash(query))
 	bodyHash := sha256Hash(strings.Join(hashes, ""))
 
-	response := make(chan MinerResponse)
-
-	var minerWaitGroup sync.WaitGroup
-	minerWaitGroup.Add(len(miners))
-
-	go func() {
-		minerWaitGroup.Wait()
-		close(response)
-	}()
-
 	tr := &http.Transport{
 		MaxIdleConns:      10,
 		IdleConnTimeout:   30 * time.Second,
@@ -200,131 +194,119 @@ func queryMiners(c *Context, sources []string, query string) string {
 
 	warn := c.Warn
 
-	for _, m := range miners {
-		go func(miner Miner) {
-			defer minerWaitGroup.Done()
-
-			message := []string{fmt.Sprint(nonce), HOTKEY, miner.Hotkey, INSTANCE_UUID, bodyHash}
-			joinedMessage := strings.Join(message, ".")
-			signedMessage := signMessage(joinedMessage, PUBLIC_KEY, PRIVATE_KEY)
-			port := fmt.Sprint(miner.Port)
-			version := 672
-			body := InferenceBody{
-				Name:           "Inference",
-				Timeout:        12.0,
-				TotalSize:      0,
-				HeaderSize:     0,
-				RequiredFields: []string{"sources", "query", "seed"},
-				Sources:        sources,
-				Query:          query,
-				BodyHash:       "",
-				Dendrite: DendriteOrAxon{
-					Ip:            "10.0.0.1",
-					Version:       &version,
-					Nonce:         &nonce,
-					Uuid:          &INSTANCE_UUID,
-					Hotkey:        HOTKEY,
-					Signature:     &signedMessage,
-					Port:          nil,
-					StatusCode:    nil,
-					StatusMessage: nil,
-					ProcessTime:   nil,
-				},
-				Axon: DendriteOrAxon{
-					StatusCode:    nil,
-					StatusMessage: nil,
-					ProcessTime:   nil,
-					Version:       nil,
-					Nonce:         nil,
-					Uuid:          nil,
-					Signature:     nil,
-					Ip:            miner.Ip,
-					Port:          &port,
-					Hotkey:        miner.Hotkey,
-				},
-				SamplingParams: SamplingParams{
-					Seed:                nil,
-					Truncate:            nil,
-					BestOf:              1,
-					DecoderInputDetails: true,
-					Details:             false,
-					DoSample:            true,
-					MaxNewTokens:        3072,
-					RepetitionPenalty:   1.0,
-					ReturnFullText:      false,
-					Stop:                []string{"photographer"},
-					Temperature:         .01,
-					TopK:                10,
-					TopNTokens:          5,
-					TopP:                .9999999,
-					TypicalP:            .9999999,
-					Watermark:           false,
-				},
-				Completion: nil,
-			}
-
-			endpoint := "http://" + miner.Ip + ":" + fmt.Sprint(miner.Port) + "/Inference"
-			out, err := json.Marshal(body)
-			r, err := http.NewRequestWithContext(ctx, "POST", endpoint, bytes.NewBuffer(out))
-			if err != nil {
-				warn.Printf("Failed miner request: %s\n", err.Error())
-				return
-			}
-			r.Close = true
-			r.Header["Content-Type"] = []string{"application/json"}
-			r.Header["Connection"] = []string{"keep-alive"}
-			r.Header["name"] = []string{"Inference"}
-			r.Header["timeout"] = []string{"12.0"}
-			r.Header["bt_header_axon_ip"] = []string{miner.Ip}
-			r.Header["bt_header_axon_port"] = []string{strconv.Itoa(miner.Port)}
-			r.Header["bt_header_axon_hotkey"] = []string{miner.Hotkey}
-			r.Header["bt_header_dendrite_ip"] = []string{"10.0.0.1"}
-			r.Header["bt_header_dendrite_version"] = []string{"672"}
-			r.Header["bt_header_dendrite_nonce"] = []string{strconv.Itoa(int(nonce))}
-			r.Header["bt_header_dendrite_uuid"] = []string{INSTANCE_UUID}
-			r.Header["bt_header_dendrite_hotkey"] = []string{HOTKEY}
-			r.Header["bt_header_input_obj_sources"] = []string{"W10="}
-			r.Header["bt_header_input_obj_query"] = []string{"IiI="}
-			r.Header["bt_header_dendrite_signature"] = []string{signedMessage}
-			r.Header["header_size"] = []string{"0"}
-			r.Header["total_size"] = []string{"0"}
-			r.Header["computed_body_hash"] = []string{bodyHash}
-			r.Header.Add("Accept-Encoding", "identity")
-
-			res, err := httpClient.Do(r)
-			if err != nil {
-				warn.Printf("Miner: %s %s\nError: %s\n", miner.Hotkey, miner.Coldkey, err.Error())
-				if res != nil {
-					res.Body.Close()
-				}
-				return
-			}
-			if res.StatusCode != http.StatusOK {
-				bdy, _ := io.ReadAll(res.Body)
-				res.Body.Close()
-				warn.Printf("Miner: %s %s\nError: %s\n", miner.Hotkey, miner.Coldkey, string(bdy))
-				return
-			}
-
-			axon_version := res.Header.Get("Bt_header_axon_version")
-			ver, err := strconv.Atoi(axon_version)
-			if err != nil || ver < 672 {
-				res.Body.Close()
-				warn.Printf("Miner: %s %s\nError: Axon version too low\n", miner.Hotkey, miner.Coldkey)
-				return
-			}
-			response <- MinerResponse{Res: res, ColdKey: miner.Coldkey, HotKey: miner.Hotkey}
-		}(m)
-	}
-	attempts := 0
-	for {
-		attempts++
-		res, more := <-response
-		if !more {
-			return ""
+	for index, miner := range miners {
+		message := []string{fmt.Sprint(nonce), HOTKEY, miner.Hotkey, INSTANCE_UUID, bodyHash}
+		joinedMessage := strings.Join(message, ".")
+		signedMessage := signMessage(joinedMessage, PUBLIC_KEY, PRIVATE_KEY)
+		port := fmt.Sprint(miner.Port)
+		version := 672
+		body := InferenceBody{
+			Name:           "Inference",
+			Timeout:        12.0,
+			TotalSize:      0,
+			HeaderSize:     0,
+			RequiredFields: []string{"sources", "query", "seed"},
+			Sources:        sources,
+			Query:          query,
+			BodyHash:       "",
+			Dendrite: DendriteOrAxon{
+				Ip:            "10.0.0.1",
+				Version:       &version,
+				Nonce:         &nonce,
+				Uuid:          &INSTANCE_UUID,
+				Hotkey:        HOTKEY,
+				Signature:     &signedMessage,
+				Port:          nil,
+				StatusCode:    nil,
+				StatusMessage: nil,
+				ProcessTime:   nil,
+			},
+			Axon: DendriteOrAxon{
+				StatusCode:    nil,
+				StatusMessage: nil,
+				ProcessTime:   nil,
+				Version:       nil,
+				Nonce:         nil,
+				Uuid:          nil,
+				Signature:     nil,
+				Ip:            miner.Ip,
+				Port:          &port,
+				Hotkey:        miner.Hotkey,
+			},
+			SamplingParams: SamplingParams{
+				Seed:                nil,
+				Truncate:            nil,
+				BestOf:              1,
+				DecoderInputDetails: true,
+				Details:             false,
+				DoSample:            true,
+				MaxNewTokens:        3072,
+				RepetitionPenalty:   1.0,
+				ReturnFullText:      false,
+				Stop:                []string{"photographer"},
+				Temperature:         .01,
+				TopK:                10,
+				TopNTokens:          5,
+				TopP:                .9999999,
+				TypicalP:            .9999999,
+				Watermark:           false,
+			},
+			Completion: nil,
 		}
-		c.Info.Printf("Attempt: %d Miner: %s %s\n", attempts, res.HotKey, res.ColdKey)
-		reader := bufio.NewReader(res.Res.Body)
+
+		endpoint := "http://" + miner.Ip + ":" + fmt.Sprint(miner.Port) + "/Inference"
+		out, err := json.Marshal(body)
+		r, err := http.NewRequestWithContext(ctx, "POST", endpoint, bytes.NewBuffer(out))
+		if err != nil {
+			warn.Printf("Failed miner request: %s\n", err.Error())
+			continue
+		}
+		r.Close = true
+		r.Header["Content-Type"] = []string{"application/json"}
+		r.Header["Connection"] = []string{"keep-alive"}
+		r.Header["name"] = []string{"Inference"}
+		r.Header["timeout"] = []string{"12.0"}
+		r.Header["bt_header_axon_ip"] = []string{miner.Ip}
+		r.Header["bt_header_axon_port"] = []string{strconv.Itoa(miner.Port)}
+		r.Header["bt_header_axon_hotkey"] = []string{miner.Hotkey}
+		r.Header["bt_header_dendrite_ip"] = []string{"10.0.0.1"}
+		r.Header["bt_header_dendrite_version"] = []string{"672"}
+		r.Header["bt_header_dendrite_nonce"] = []string{strconv.Itoa(int(nonce))}
+		r.Header["bt_header_dendrite_uuid"] = []string{INSTANCE_UUID}
+		r.Header["bt_header_dendrite_hotkey"] = []string{HOTKEY}
+		r.Header["bt_header_input_obj_sources"] = []string{"W10="}
+		r.Header["bt_header_input_obj_query"] = []string{"IiI="}
+		r.Header["bt_header_dendrite_signature"] = []string{signedMessage}
+		r.Header["header_size"] = []string{"0"}
+		r.Header["total_size"] = []string{"0"}
+		r.Header["computed_body_hash"] = []string{bodyHash}
+		r.Header.Add("Accept-Encoding", "identity")
+
+		res, err := httpClient.Do(r)
+		if err != nil {
+			warn.Printf("Miner: %s %s\nError: %s\n", miner.Hotkey, miner.Coldkey, err.Error())
+			if res != nil {
+				res.Body.Close()
+			}
+			continue
+		}
+		if res.StatusCode != http.StatusOK {
+			bdy, _ := io.ReadAll(res.Body)
+			res.Body.Close()
+			warn.Printf("Miner: %s %s\nError: %s\n", miner.Hotkey, miner.Coldkey, string(bdy))
+			continue
+		}
+
+		axon_version := res.Header.Get("Bt_header_axon_version")
+		ver, err := strconv.Atoi(axon_version)
+		if err != nil || ver < 672 {
+			res.Body.Close()
+			warn.Printf("Miner: %s %s\nError: Axon version too low\n", miner.Hotkey, miner.Coldkey)
+			continue
+		}
+
+		c.Info.Printf("Attempt: %d Miner: %s %s\n", index, miner.Hotkey, miner.Coldkey)
+		reader := bufio.NewReader(res.Body)
 		finished := false
 		ans := ""
 		for {
@@ -350,18 +332,13 @@ func queryMiners(c *Context, sources []string, query string) string {
 				break
 			}
 		}
-		res.Res.Body.Close()
+		res.Body.Close()
 		if finished == false {
 			continue
 		}
-		go func() {
-			for res := range response {
-				res.Res.Body.Close()
-			}
-		}()
 		return ans
 	}
-
+	return ""
 }
 
 func saveAnswer(query string, answer string, sources []string, session string) {
