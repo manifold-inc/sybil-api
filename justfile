@@ -20,6 +20,7 @@ up extra='': build
   @printf " {{GREEN}}{{CHECK}} Images Started {{CHECK}} {{RESET}}"
 
 prod: build
+  docker compose pull
   docker compose up -d
   @printf " {{GREEN}}{{CHECK}} Images Started {{CHECK}} {{RESET}}"
 
