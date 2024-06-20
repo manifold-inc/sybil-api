@@ -117,18 +117,32 @@ func main() {
 		if err != nil {
 			return c.String(500, "")
 		}
-		var llmSources []string
-		for i, element := range general.Results {
-			llmSources = append(llmSources, fmt.Sprintf("Title: %s:\nSnippet: %s\n", *element.Title, *element.Content))
-			if i == 2 {
-				break
-			}
-		}
 
 		sendEvent(cc, map[string]any{
 			"type":    "sources",
 			"sources": general.Results,
 		})
+		sendEvent(cc, map[string]any{
+			"type":      "related",
+			"followups": general.Suggestions,
+		})
+
+		llmSources := []string{}
+		if len(general.Results) != 0 {
+			herocard := general.Results[0]
+			llmSources = append(llmSources, fmt.Sprintf("Title: %s:\nSnippet: %s\n", derefString(general.Results[0].Title), derefString(general.Results[0].Content)))
+			sendEvent(cc, map[string]any{
+				"type": "heroCard",
+				"heroCard": map[string]any{
+					"type":  "news",
+					"url":   *herocard.Url,
+					"image": herocard.Thumbnail,
+					"title": *herocard.Title,
+					"intro": *herocard.Content,
+					"size":  "auto",
+				},
+			})
+		}
 
 		answer := queryMiners(cc, llmSources, query)
 

@@ -25,6 +25,13 @@ import (
 	"golang.org/x/crypto/sha3"
 )
 
+func derefString(s *string) string {
+	if s != nil {
+		return *s
+	}
+	return ""
+}
+
 func safeEnv(env string) string {
 	// Lookup env variable, and panic if not present
 
@@ -134,68 +141,6 @@ func sendEvent(c *Context, data map[string]any) {
 	c.Response().Flush()
 }
 
-func generalSearch(wg *sync.WaitGroup, c *Context, query string, src chan []string, page int) {
-	defer wg.Done()
-	search, err := querySearx(c, query, "general", page)
-	if err != nil {
-		close(src)
-		return
-	}
-
-	sendEvent(c, map[string]any{
-		"type":    "sources",
-		"sources": search.Results,
-	})
-	var llmSources []string
-	for i, element := range search.Results {
-		llmSources = append(llmSources, fmt.Sprintf("Title: %s:\nSnippet: %s\n", *element.Title, *element.Content))
-		if i == 4 {
-			break
-		}
-	}
-	src <- llmSources
-	src <- llmSources
-	sendEvent(c, map[string]any{
-		"type":      "related",
-		"followups": search.Suggestions,
-	})
-
-	if len(search.Results) != 0 {
-		herocard := search.Results[0]
-		sendEvent(c, map[string]any{
-			"type": "heroCard",
-			"heroCard": map[string]any{
-				"type":  "news",
-				"url":   *herocard.Url,
-				"image": herocard.Thumbnail,
-				"title": *herocard.Title,
-				"intro": *herocard.Content,
-				"size":  "auto",
-			},
-		})
-	}
-}
-
-func queryNews(wg *sync.WaitGroup, c *Context, query string) {
-	defer wg.Done()
-	results, err := querySearx(c, query, "news", 1)
-	if err != nil {
-		return
-	}
-	herocard := results.Results[0]
-	sendEvent(c, map[string]any{
-		"type": "heroCard",
-		"heroCard": map[string]any{
-			"type":  "news",
-			"url":   *herocard.Url,
-			"image": herocard.Thumbnail,
-			"title": *herocard.Title,
-			"intro": *herocard.Content,
-			"size":  "auto",
-		},
-	})
-}
-
 func getTopMiners(c *Context) []Miner {
 	rh := rejson.NewReJSONHandler()
 	rh.SetGoRedisClientWithContext(c.Request().Context(), client)
@@ -220,6 +165,7 @@ func queryMiners(c *Context, sources []string, query string) string {
 	}
 	// First we get our miners
 	miners := getTopMiners(c)
+	miners = append(miners, Miner{Ip: "103.50.32.27", Port: 37513, Coldkey: "5GGgXrtuX32c9amUoBa16b7yFGneRBueFLZHzaWX7UgACKSs", Hotkey: "5HopRx6DHvrH3QkCwQg6wsTdajTB6D3Je7mvR1cMNu7RRkKg"})
 	if miners == nil {
 		return "No"
 	}
