@@ -33,6 +33,6 @@ async def sync_miners(n: int):
 if __name__ == "__main__":
     subtensor = bt.subtensor("ws://subtensor.sybil.com:9944")
     metagraph: bt.metagraph = subtensor.metagraph(netuid=4)
-    r = Redis(host="mcacher-cache", port=6379, decode_responses=True)
+    r = Redis(host="redis", port=6379, decode_responses=True)
     while True:
         asyncio.run(sync_miners(4))
