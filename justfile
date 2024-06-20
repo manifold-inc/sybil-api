@@ -19,9 +19,9 @@ up extra='': build
   docker compose -f docker-compose.yml -f docker-compose.build.yml -f docker-compose.dev.yml up -d --force-recreate {{extra}}
   @printf " {{GREEN}}{{CHECK}} Images Started {{CHECK}} {{RESET}}"
 
-prod: build
-  docker compose pull
-  docker compose up -d
+prod image="": build
+  docker compose pull 
+  docker compose up -d {{image}}
   @printf " {{GREEN}}{{CHECK}} Images Started {{CHECK}} {{RESET}}"
 
 upgrade: pull build
