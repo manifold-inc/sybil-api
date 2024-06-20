@@ -16,7 +16,7 @@ pull:
   @git pull
 
 up extra='': build
-  docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --force-recreate {{extra}}
+  docker compose -f docker-compose.yml -f docker-compose.build.yml -f docker-compose.dev.yml up -d --force-recreate {{extra}}
   @printf " {{GREEN}}{{CHECK}} Images Started {{CHECK}} {{RESET}}"
 
 prod: build
@@ -30,8 +30,9 @@ upgrade: pull build
 down:
   @docker compose down
 
-push: build
-  docker compose push
+push: (build)
+  docker compose -f docker-compose.build.yml build
+  docker compose -f docker-compose.build.yml push
 
 print:
   @printf " {{GREEN}}{{CHECK}} Images Started {{CHECK}} {{RESET}}"

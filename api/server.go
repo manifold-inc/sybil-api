@@ -120,7 +120,7 @@ func main() {
 		var llmSources []string
 		for i, element := range general.Results {
 			llmSources = append(llmSources, fmt.Sprintf("Title: %s:\nSnippet: %s\n", *element.Title, *element.Content))
-			if i == 4 {
+			if i == 2 {
 				break
 			}
 		}

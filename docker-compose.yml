@@ -9,8 +9,6 @@ services:
       - traefik.http.routers.searcher.tls.certresolver=letsencrypt
       - traefik.http.services.searcher.loadbalancer.server.port=80
     env_file: .env
-    build:
-      context: ./api
     restart: always
     depends_on:
       redis:
@@ -18,8 +16,6 @@ services:
 
   miner-cache:
     image: manifoldlabs/sybil-miner-cache:latest
-    build:
-      context: ./miner-cache
     restart: always
     depends_on:
       redis:

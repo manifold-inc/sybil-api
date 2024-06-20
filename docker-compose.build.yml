@@ -1,0 +1,10 @@
+services:
+  api:
+    image: manifoldlabs/sybil-api:latest
+    build:
+      context: ./api
+
+  miner-cache:
+    image: manifoldlabs/sybil-miner-cache:latest
+    build:
+      context: ./miner-cache
