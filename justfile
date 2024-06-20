@@ -2,6 +2,7 @@ GREEN  := "\\u001b[32m"
 RESET  := "\\u001b[0m\\n"
 CHECK  := "\\xE2\\x9C\\x94"
 
+org := 'manifoldlabs'
 set shell := ["bash", "-uc"]
 
 default:
@@ -28,6 +29,9 @@ upgrade: pull build
 
 down:
   @docker compose down
+
+push: build
+  docker compose push
 
 print:
   @printf " {{GREEN}}{{CHECK}} Images Started {{CHECK}} {{RESET}}"

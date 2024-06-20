@@ -1,5 +1,6 @@
 services:
-  searcher:
+  api:
+    image: manifoldlabs/sybil-api:latest
     scale: 3
     labels:
       - traefik.enable=true
@@ -9,21 +10,22 @@ services:
       - traefik.http.services.searcher.loadbalancer.server.port=80
     env_file: .env
     build:
-      context: ./searcher
+      context: ./api
     restart: always
     depends_on:
-      mcacher-cache:
+      miner-cache:
         condition: service_healthy
 
-  mcacher:
+  miner-cache:
+    image: manifoldlabs/sybil-miner-cache:latest
     build:
-      context: ./mcacher
+      context: ./miner-cache
     restart: always
     depends_on:
-      mcacher-cache:
+      miner-cache:
         condition: service_healthy
 
-  mcacher-cache:
+  redis:
     image: redis/redis-stack-server:latest
     restart: always
     healthcheck:
@@ -39,24 +41,6 @@ services:
       - ./searxng:/etc/searxng:rw
     environment:
       - SEARXNG_BASE_URL=http://localhost:8080/
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "1m"
-        max-file: "1"
-
-  searx-cache:
-    image: docker.io/valkey/valkey:7-alpine
-    command: valkey-server --save 30 1 --loglevel warning
-    restart: always
-    volumes:
-      - searx-data:/data
-    cap_drop:
-      - ALL
-    cap_add:
-      - SETGID
-      - SETUID
-      - DAC_OVERRIDE
     logging:
       driver: "json-file"
       options:

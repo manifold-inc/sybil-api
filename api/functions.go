@@ -134,7 +134,7 @@ func sendEvent(c *Context, data map[string]any) {
 	c.Response().Flush()
 }
 
-func querySearch(wg *sync.WaitGroup, c *Context, query string, src chan []string, page int) {
+func generalSearch(wg *sync.WaitGroup, c *Context, query string, src chan []string, page int) {
 	defer wg.Done()
 	search, err := querySearx(c, query, "general", page)
 	if err != nil {
@@ -153,12 +153,27 @@ func querySearch(wg *sync.WaitGroup, c *Context, query string, src chan []string
 			break
 		}
 	}
+	src <- llmSources
+	src <- llmSources
 	sendEvent(c, map[string]any{
 		"type":      "related",
 		"followups": search.Suggestions,
 	})
-	src <- llmSources
-	src <- llmSources
+
+	if len(search.Results) != 0 {
+		herocard := search.Results[0]
+		sendEvent(c, map[string]any{
+			"type": "heroCard",
+			"heroCard": map[string]any{
+				"type":  "news",
+				"url":   *herocard.Url,
+				"image": herocard.Thumbnail,
+				"title": *herocard.Title,
+				"intro": *herocard.Content,
+				"size":  "auto",
+			},
+		})
+	}
 }
 
 func queryNews(wg *sync.WaitGroup, c *Context, query string) {
@@ -199,25 +214,18 @@ func getTopMiners(c *Context) []Miner {
 	return miners
 }
 
-func queryMiners(wg *sync.WaitGroup, c *Context, sources chan []string, query string, answer chan string) {
-	defer close(answer)
-	defer wg.Done()
-
+func queryMiners(c *Context, sources []string, query string) string {
 	if DEBUG {
-		return
+		return "No Answer"
 	}
 	// First we get our miners
 	miners := getTopMiners(c)
 	if miners == nil {
-		return
+		return "No"
 	}
 
-	llm_sources, more := <-sources
-	if !more {
-		return
-	}
 	var hashes []string
-	formatted := formatListToPythonString(llm_sources)
+	formatted := formatListToPythonString(sources)
 	hashes = append(hashes, sha256Hash(formatted))
 	hashes = append(hashes, sha256Hash(query))
 	bodyHash := sha256Hash(strings.Join(hashes, ""))
@@ -261,7 +269,7 @@ func queryMiners(wg *sync.WaitGroup, c *Context, sources chan []string, query st
 				TotalSize:      0,
 				HeaderSize:     0,
 				RequiredFields: []string{"sources", "query", "seed"},
-				Sources:        llm_sources,
+				Sources:        sources,
 				Query:          query,
 				BodyHash:       "",
 				Dendrite: DendriteOrAxon{
@@ -367,7 +375,7 @@ func queryMiners(wg *sync.WaitGroup, c *Context, sources chan []string, query st
 		attempts++
 		res, more := <-response
 		if !more {
-			return
+			return ""
 		}
 		c.Info.Printf("Attempt: %d Miner: %s %s\n", attempts, res.HotKey, res.ColdKey)
 		reader := bufio.NewReader(res.Res.Body)
@@ -400,25 +408,20 @@ func queryMiners(wg *sync.WaitGroup, c *Context, sources chan []string, query st
 		if finished == false {
 			continue
 		}
-		answer <- ans
-		break
-	}
-	for {
-		select {
-		case res, ok := <-response:
-			if !ok {
-				response = nil
-				break
+		go func() {
+			for res := range response {
+				res.Res.Body.Close()
 			}
-			res.Res.Body.Close()
-		}
-		if response == nil {
-			break
-		}
+		}()
+		return ans
 	}
+
 }
 
-func saveAnswer(query string, answer chan string, sources chan []string, session string) {
+func saveAnswer(query string, answer string, sources []string, session string) {
+	if DEBUG {
+		return
+	}
 	publicId, err := nanoid.Generate("0123456789abcdefghijklmnopqrstuvwxyz", 29)
 	if err != nil {
 		log.Println("Failed generating publicId for db:", err)
@@ -442,19 +445,9 @@ func saveAnswer(query string, answer chan string, sources chan []string, session
 		}
 	}
 
-	ans, more := <-answer
-	if !more {
-		log.Println("Faield to get answer")
-		return
-	}
-	srcs, more := <-sources
-	if !more {
-		log.Println("Faield to get sources")
-		return
-	}
-	jsonSrcs, _ := json.Marshal(srcs)
+	jsonSrcs, _ := json.Marshal(sources)
 	q := `INSERT INTO search (public_id, user_iid, query, sources, completion) VALUES (?, ?, ?, ?, ?);`
-	_, err = db.Exec(q, publicId, userId, query, string(jsonSrcs), ans)
+	_, err = db.Exec(q, publicId, userId, query, string(jsonSrcs), answer)
 	if err != nil && err != sql.ErrNoRows {
 		log.Printf("Error: %s\n", err)
 		return

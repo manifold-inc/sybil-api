@@ -1,5 +1,5 @@
 services:
-  searcher:
+  api:
     scale: 1
     environment:
       - DEBUG=true

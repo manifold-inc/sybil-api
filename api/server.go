@@ -92,7 +92,7 @@ func main() {
 	e.POST("/search", func(c echo.Context) error {
 		cc := c.(*Context)
 		type RequestBody struct {
-			Query string   `json:"query"`
+			Query string `json:"query"`
 		}
 		cc.Request().Header.Add("Content-Type", "application/json")
 		var requestBody RequestBody
@@ -113,18 +113,34 @@ func main() {
 		c.Response().Header().Set("X-Accel-Buffering", "no")
 
 		cc.Info.Printf("/search: %s\n", query)
-		sources := make(chan []string)
-		answer := make(chan string)
-		var wg sync.WaitGroup
-		wg.Add(3)
-		go querySearch(&wg, cc, query, sources, 0)
-		go queryNews(&wg, cc, query)
-		go queryMiners(&wg, cc, sources, query, answer)
-		go saveAnswer(query, answer, sources, c.Request().Header.Get("X-SESSION-ID"))
-		wg.Wait()
+
+		general, err := querySearx(cc, query, "general", 0)
+		if err != nil {
+			return c.String(500, "")
+		}
+		var llmSources []string
+		for i, element := range general.Results {
+			llmSources = append(llmSources, fmt.Sprintf("Title: %s:\nSnippet: %s\n", *element.Title, *element.Content))
+			if i == 4 {
+				break
+			}
+		}
+
+		sendEvent(cc, map[string]any{
+			"type":    "sources",
+			"sources": general.Results,
+		})
+
+		answer := queryMiners(cc, llmSources, query)
+
+		// We let this run in the background
+		go saveAnswer(query, answer, llmSources, c.Request().Header.Get("X-SESSION-ID"))
+
 		return c.String(200, "")
 	})
+
 	e.GET("/autocomplete", func(c echo.Context) error {
+
 		client := &http.Client{}
 		query := c.QueryParam("q")
 		req, err := http.NewRequest(http.MethodGet, SEARX_URL+"/autocompleter", nil)
@@ -147,6 +163,7 @@ func main() {
 		json.NewDecoder(res.Body).Decode(&resp)
 		return c.JSON(200, resp)
 	})
+
 	e.POST("/search/sources", func(c echo.Context) error {
 		cc := c.(*Context)
 		type RequestBody struct {
