@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"os"
 	"strconv"
-	"sync"
 
 	"github.com/aidarkhanov/nanoid"
 	_ "github.com/go-sql-driver/mysql"

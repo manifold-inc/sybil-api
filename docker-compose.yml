@@ -13,7 +13,7 @@ services:
       context: ./api
     restart: always
     depends_on:
-      miner-cache:
+      redis:
         condition: service_healthy
 
   miner-cache:
@@ -22,7 +22,7 @@ services:
       context: ./miner-cache
     restart: always
     depends_on:
-      miner-cache:
+      redis:
         condition: service_healthy
 
   redis:
