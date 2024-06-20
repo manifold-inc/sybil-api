@@ -169,7 +169,6 @@ func queryMiners(c *Context, sources []string, query string) string {
 	}
 	// First we get our miners
 	miners := getTopMiners(c)
-	miners = append(miners, Miner{Ip: "103.50.32.27", Port: 37513, Coldkey: "5GGgXrtuX32c9amUoBa16b7yFGneRBueFLZHzaWX7UgACKSs", Hotkey: "5HopRx6DHvrH3QkCwQg6wsTdajTB6D3Je7mvR1cMNu7RRkKg"})
 	if miners == nil {
 		return "No"
 	}
