@@ -8,15 +8,15 @@ set shell := ["bash", "-uc"]
 default:
   @just --list
 
-build opts = "":
-  docker compose build {{opts}}
+build dockerfile = "" opts = "":
+  docker compose {{dockerfile}} build {{opts}}
   @printf " {{GREEN}}{{CHECK}} Successfully built! {{CHECK}} {{RESET}}"
 
 pull:
   @git pull
 
-up extra='': build
-  docker compose -f docker-compose.yml -f docker-compose.build.yml -f docker-compose.dev.yml up -d --force-recreate {{extra}}
+up extra='': (build "-f docker-compose.yml -f docker-compose.dev.yml")
+  docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d {{extra}}
   @printf " {{GREEN}}{{CHECK}} Images Started {{CHECK}} {{RESET}}"
 
 prod image="": build

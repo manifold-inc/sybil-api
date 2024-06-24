@@ -62,13 +62,16 @@ type SamplingParams struct {
 }
 
 type SearxResults struct {
-	Url           *string `json:"url,omitempty"`
-	Title         *string `json:"title,omitempty"`
-	Content       *string `json:"content,omitempty"`
-	Thumbnail     *string `json:"thumbnail,omitempty"`
+	Url           *string   `json:"url,omitempty"`
+	Source        *string   `json:"source,omitempty"`
+	Resolution    *string   `json:"resolution,omitempty"`
+	ImgSource     *string   `json:"img_src,omitempty"`
+	Title         *string   `json:"title,omitempty"`
+	Content       *string   `json:"content,omitempty"`
+	Thumbnail     *string   `json:"thumbnail,omitempty"`
 	ParsedUrl     *[]string `json:"parsed_url,omitempty"`
-	Metadata      *string `json:"metadata,omitempty"`
-	PublishedDate *string `json:"publishedDate,omitempty"`
+	Metadata      *string   `json:"metadata,omitempty"`
+	PublishedDate *string   `json:"publishedDate,omitempty"`
 }
 
 type SearxResponseBody struct {

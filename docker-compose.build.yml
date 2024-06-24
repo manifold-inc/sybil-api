@@ -4,6 +4,7 @@ services:
     build:
       platforms: 
       - linux/amd64
+      - linux/arm64
       context: ./api
 
   miner-cache:
@@ -11,4 +12,5 @@ services:
     build:
       platforms: 
       - linux/amd64
+      - linux/arm64
       context: ./miner-cache

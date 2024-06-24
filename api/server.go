@@ -88,6 +88,26 @@ func main() {
 	defer db.Close()
 	defer client.Close()
 
+	e.POST("/search/images", func(c echo.Context) error {
+		cc := c.(*Context)
+		type RequestBody struct {
+			Query string `json:"query"`
+			Page  int    `json:"page"`
+		}
+		var requestBody RequestBody
+		err = json.NewDecoder(c.Request().Body).Decode(&requestBody)
+		query := requestBody.Query
+		if err != nil {
+			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		}
+		cc.Info.Printf("/search/images: %s, page: %d\n", query, requestBody.Page)
+		search, err := querySearx(cc, query, "images", requestBody.Page)
+		if err != nil {
+			return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		}
+		return c.JSON(200, search.Results)
+	})
+
 	e.POST("/search", func(c echo.Context) error {
 		cc := c.(*Context)
 		type RequestBody struct {
