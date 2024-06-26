@@ -133,7 +133,7 @@ func main() {
 
 		cc.Info.Printf("/search: %s\n", query)
 
-		general, err := querySearx(cc, query, "general", 0)
+		general, err := querySearx(cc, query, "general", 1)
 		if err != nil {
 			return c.String(500, "")
 		}

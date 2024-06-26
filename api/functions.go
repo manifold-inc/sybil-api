@@ -191,8 +191,6 @@ func queryMiners(c *Context, sources []string, query string) string {
 
 	ctx := c.Request().Context()
 
-	warn := c.Warn
-
 	for index, miner := range miners {
 		message := []string{fmt.Sprint(nonce), HOTKEY, miner.Hotkey, INSTANCE_UUID, bodyHash}
 		joinedMessage := strings.Join(message, ".")
@@ -257,7 +255,7 @@ func queryMiners(c *Context, sources []string, query string) string {
 		out, err := json.Marshal(body)
 		r, err := http.NewRequestWithContext(ctx, "POST", endpoint, bytes.NewBuffer(out))
 		if err != nil {
-			warn.Printf("Failed miner request: %s\n", err.Error())
+			c.Warn.Printf("Failed miner request: %s\n", err.Error())
 			continue
 		}
 		r.Close = true
@@ -283,7 +281,7 @@ func queryMiners(c *Context, sources []string, query string) string {
 
 		res, err := httpClient.Do(r)
 		if err != nil {
-			warn.Printf("Miner: %s %s\nError: %s\n", miner.Hotkey, miner.Coldkey, err.Error())
+			c.Warn.Printf("Miner: %s %s\nError: %s\n", miner.Hotkey, miner.Coldkey, err.Error())
 			if res != nil {
 				res.Body.Close()
 			}
@@ -292,7 +290,7 @@ func queryMiners(c *Context, sources []string, query string) string {
 		if res.StatusCode != http.StatusOK {
 			bdy, _ := io.ReadAll(res.Body)
 			res.Body.Close()
-			warn.Printf("Miner: %s %s\nError: %s\n", miner.Hotkey, miner.Coldkey, string(bdy))
+			c.Warn.Printf("Miner: %s %s\nError: %s\n", miner.Hotkey, miner.Coldkey, string(bdy))
 			continue
 		}
 
@@ -300,7 +298,7 @@ func queryMiners(c *Context, sources []string, query string) string {
 		ver, err := strconv.Atoi(axon_version)
 		if err != nil || ver < 672 {
 			res.Body.Close()
-			warn.Printf("Miner: %s %s\nError: Axon version too low\n", miner.Hotkey, miner.Coldkey)
+			c.Warn.Printf("Miner: %s %s\nError: Axon version too low\n", miner.Hotkey, miner.Coldkey)
 			continue
 		}
 
@@ -328,6 +326,7 @@ func queryMiners(c *Context, sources []string, query string) string {
 				"finished": finished,
 			})
 			if err == io.EOF {
+				finished = true
 				break
 			}
 		}

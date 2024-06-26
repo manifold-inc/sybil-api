@@ -3,11 +3,11 @@ from typing import List, Tuple
 import bittensor as bt
 from redis import Redis
 from redis.commands.json.path import Path
-import torch
+import numpy
 
 
 async def sync_miners(n: int):
-    indices = torch.topk(torch.Tensor(metagraph.incentive), n).indices
+    indices = numpy.argsort(metagraph.incentive)[-n:]
 
     # Get the corresponding uids
     uids_with_highest_incentives: List[int] = metagraph.uids[indices].tolist()
