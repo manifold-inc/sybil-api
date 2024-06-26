@@ -76,7 +76,7 @@ func querySearx(c *Context, query string, categories string, page int) (*SearxRe
 	res, err := http.PostForm(SEARX_URL+"/search", url.Values{
 		"q":          {query},
 		"format":     {"json"},
-		"page":       {fmt.Sprint(page)},
+		"pageno":       {fmt.Sprint(page)},
 		"categories": {categories},
 	})
 
