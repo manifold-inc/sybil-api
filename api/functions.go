@@ -3,7 +3,6 @@ package main
 import (
 	"bufio"
 	"bytes"
-	"math/rand"
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
@@ -11,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math/rand"
 	"net/http"
 	"net/url"
 	"os"
@@ -76,7 +76,7 @@ func querySearx(c *Context, query string, categories string, page int) (*SearxRe
 	res, err := http.PostForm(SEARX_URL+"/search", url.Values{
 		"q":          {query},
 		"format":     {"json"},
-		"pageno":       {fmt.Sprint(page)},
+		"pageno":     {fmt.Sprint(page)},
 		"categories": {categories},
 	})
 
@@ -157,8 +157,8 @@ func getTopMiners(c *Context) []Miner {
 		return nil
 	}
 	for i := range miners {
-			j := rand.Intn(i + 1)
-			miners[i], miners[j] = miners[j], miners[i]
+		j := rand.Intn(i + 1)
+		miners[i], miners[j] = miners[j], miners[i]
 	}
 	return miners
 }
@@ -188,8 +188,6 @@ func queryMiners(c *Context, sources []string, query string) string {
 	httpClient := http.Client{Transport: tr}
 
 	nonce := time.Now().UnixNano()
-
-	ctx := c.Request().Context()
 
 	for index, miner := range miners {
 		message := []string{fmt.Sprint(nonce), HOTKEY, miner.Hotkey, INSTANCE_UUID, bodyHash}
@@ -253,7 +251,7 @@ func queryMiners(c *Context, sources []string, query string) string {
 
 		endpoint := "http://" + miner.Ip + ":" + fmt.Sprint(miner.Port) + "/Inference"
 		out, err := json.Marshal(body)
-		r, err := http.NewRequestWithContext(ctx, "POST", endpoint, bytes.NewBuffer(out))
+		r, err := http.NewRequest("POST", endpoint, bytes.NewBuffer(out))
 		if err != nil {
 			c.Warn.Printf("Failed miner request: %s\n", err.Error())
 			continue

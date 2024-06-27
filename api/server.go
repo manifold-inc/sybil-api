@@ -13,6 +13,7 @@ import (
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v4/middleware"
 
 	"github.com/redis/go-redis/v9"
 )
@@ -72,6 +73,7 @@ func main() {
 			return next(cc)
 		}
 	})
+	e.Use(middleware.Recover())
 	client = redis.NewClient(&redis.Options{
 		Addr:     "redis:6379",
 		Password: "",
