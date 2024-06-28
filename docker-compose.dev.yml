@@ -1,6 +1,5 @@
 services:
   api:
-    scale: 1
     build:
       context: ./api
       platforms: 

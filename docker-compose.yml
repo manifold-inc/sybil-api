@@ -1,7 +1,9 @@
 services:
   api:
     image: manifoldlabs/sybil-api:latest
-    scale: 3
+    healthcheck: 
+      test: ["CMD", "curl", "-f", "-X", "GET", "http://localhost/ping"]
+      interval: "1s"
     labels:
       - traefik.enable=true
       - traefik.http.routers.searcher.rule=Host(`mx-central-02.sybil.com`)
@@ -11,6 +13,8 @@ services:
     env_file: .env
     restart: always
     depends_on:
+      searxng:
+        condition: service_healthy
       redis:
         condition: service_healthy
 
@@ -32,6 +36,9 @@ services:
 
   searxng:
     image: docker.io/searxng/searxng:latest
+    healthcheck:
+      test: wget --no-verbose --tries=1 --spider http://0.0.0.0:8080 || exit 1
+      interval: 2s
     restart: always
     volumes:
       - ./searxng:/etc/searxng:rw

@@ -90,6 +90,9 @@ func main() {
 	defer db.Close()
 	defer client.Close()
 
+	e.GET(("/ping"), func(c echo.Context) error {
+		return c.String(200, "")
+	})
 	e.POST("/search/images", func(c echo.Context) error {
 		cc := c.(*Context)
 		type RequestBody struct {

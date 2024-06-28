@@ -13,8 +13,9 @@ COPY . .
 
 RUN GOOS=linux go build -o server
 
-FROM alpine:3.9 
+FROM alpine:3.20.1 
 WORKDIR /app
+RUN apk --no-cache add curl
 RUN apk add ca-certificates
 COPY --from=build /app/server server
 CMD ["/app/server"]
