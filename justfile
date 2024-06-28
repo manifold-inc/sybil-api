@@ -19,9 +19,9 @@ up extra='': (build "-f docker-compose.yml -f docker-compose.dev.yml")
   docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d {{extra}}
   @printf " {{GREEN}}{{CHECK}} Images Started {{CHECK}} {{RESET}}"
 
-prod image="": build
+prod image:
   docker compose pull 
-  docker compose up -d {{image}}
+  docker rollout {{image}}
   @printf " {{GREEN}}{{CHECK}} Images Started {{CHECK}} {{RESET}}"
 
 upgrade: pull build
