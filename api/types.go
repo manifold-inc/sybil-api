@@ -15,6 +15,14 @@ type Miner struct {
 	Coldkey string `json:"coldkey,omitempty"`
 }
 
+
+
+type ChatMessage struct {
+	Role string `json:"role"`
+	Content string `json:"content"`
+}
+
+
 type InferenceBody struct {
 	Name           string         `json:"name"`
 	Timeout        float32        `json:"timeout"`
@@ -24,8 +32,7 @@ type InferenceBody struct {
 	Axon           DendriteOrAxon `json:"axon"`
 	BodyHash       string         `json:"body_hash"`
 	RequiredFields []string       `json:"required_hash_fields"`
-	Sources        []string       `json:"sources"`
-	Query          string         `json:"query"`
+	Messages       string         `json:"messages"`
 	SamplingParams SamplingParams `json:"sampling_params"`
 	Completion     *string        `json:"completion"`
 }

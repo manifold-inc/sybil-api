@@ -169,15 +169,10 @@ func main() {
 			})
 		}
 
-		//answer := queryMiners(cc, llmSources, query)
-		sendEvent(cc, map[string]any{
-			"type":     "answer",
-			"text":     "Under Maintenance",
-			"finished": true,
-		})
+		answer := queryMiners(cc, llmSources, query)
 
 		// We let this run in the background
-		//go saveAnswer(query, answer, llmSources, c.Request().Header.Get("X-SESSION-ID"))
+		go saveAnswer(query, answer, llmSources, c.Request().Header.Get("X-SESSION-ID"))
 
 		return c.String(200, "")
 	})

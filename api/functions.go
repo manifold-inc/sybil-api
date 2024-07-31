@@ -170,14 +170,9 @@ func queryMiners(c *Context, sources []string, query string) string {
 	// First we get our miners
 	miners := getTopMiners(c)
 	if miners == nil {
-		return "No"
+		return "No Miners"
 	}
-
-	var hashes []string
-	formatted := formatListToPythonString(sources)
-	hashes = append(hashes, sha256Hash(formatted))
-	hashes = append(hashes, sha256Hash(query))
-	bodyHash := sha256Hash(strings.Join(hashes, ""))
+	bodyHash := sha256Hash("")
 
 	tr := &http.Transport{
 		MaxIdleConns:      10,
@@ -189,20 +184,40 @@ func queryMiners(c *Context, sources []string, query string) string {
 
 	nonce := time.Now().UnixNano()
 
+	now := time.Now()
+	sources_string := ""
+	for i := range sources {
+		sources_string += sources[i] + "\n"
+	}
+	messages := []ChatMessage{{Role: "system", Content: fmt.Sprintf(`### Current Date: %s
+	### Instruction: 
+	You are Sybil.com, an expert language model tasked with performing a search over the given query and search results.
+	You are running the text generation on Subnet 4, a bittensor subnet developed by Manifold Labs.
+	Your answer should be short, two paragraphs exactly, and should be relevant to the query.
+
+	### Sources:
+	%s
+	`, now.Format("Mon Jan 2 15:04:05 MST 2006"), sources_string)},{Role: "user", Content: query}}
+	messages_json, ok := json.Marshal(messages)
+	if ok != nil {
+		c.Warn.Printf(ok.Error())
+		return "Failed to json marshall"
+	}
+	c.Info.Printf(string(messages_json))
+
 	for index, miner := range miners {
 		message := []string{fmt.Sprint(nonce), HOTKEY, miner.Hotkey, INSTANCE_UUID, bodyHash}
 		joinedMessage := strings.Join(message, ".")
 		signedMessage := signMessage(joinedMessage, PUBLIC_KEY, PRIVATE_KEY)
 		port := fmt.Sprint(miner.Port)
-		version := 672
+		version := 701
 		body := InferenceBody{
 			Name:           "Inference",
 			Timeout:        12.0,
 			TotalSize:      0,
 			HeaderSize:     0,
-			RequiredFields: []string{"sources", "query", "seed"},
-			Sources:        sources,
-			Query:          query,
+			RequiredFields: []string{},
+			Messages:       string(messages_json),
 			BodyHash:       "",
 			Dendrite: DendriteOrAxon{
 				Ip:            "10.0.0.1",
