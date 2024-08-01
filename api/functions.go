@@ -180,7 +180,7 @@ func queryMiners(c *Context, sources []string, query string) string {
 		DisableKeepAlives: false,
 	}
 
-	httpClient := http.Client{Transport: tr}
+	httpClient := http.Client{Transport: tr, Timeout: 10 * time.Second}
 
 	nonce := time.Now().UnixNano()
 
@@ -197,28 +197,28 @@ func queryMiners(c *Context, sources []string, query string) string {
 
 	### Sources:
 	%s
-	`, now.Format("Mon Jan 2 15:04:05 MST 2006"), sources_string)},{Role: "user", Content: query}}
+	`, now.Format("Mon Jan 2 15:04:05 MST 2006"), sources_string)}, {Role: "user", Content: query}}
 	messages_json, ok := json.Marshal(messages)
 	if ok != nil {
 		c.Warn.Printf(ok.Error())
 		return "Failed to json marshall"
 	}
-	c.Info.Printf(string(messages_json))
 
 	for index, miner := range miners {
 		message := []string{fmt.Sprint(nonce), HOTKEY, miner.Hotkey, INSTANCE_UUID, bodyHash}
+		c.Info.Println(message)
 		joinedMessage := strings.Join(message, ".")
 		signedMessage := signMessage(joinedMessage, PUBLIC_KEY, PRIVATE_KEY)
 		port := fmt.Sprint(miner.Port)
-		version := 701
+		version := 710
 		body := InferenceBody{
-			Name:           "Inference",
-			Timeout:        12.0,
-			TotalSize:      0,
-			HeaderSize:     0,
-			RequiredFields: []string{},
-			Messages:       string(messages_json),
-			BodyHash:       "",
+			Name:             "Inference",
+			Timeout:          12.0,
+			TotalSize:        0,
+			HeaderSize:       0,
+			RequiredFields:   []string{},
+			Messages:         string(messages_json),
+			ComputedBodyHash: "",
 			Dendrite: DendriteOrAxon{
 				Ip:            "10.0.0.1",
 				Version:       &version,
@@ -250,7 +250,7 @@ func queryMiners(c *Context, sources []string, query string) string {
 				DecoderInputDetails: true,
 				Details:             false,
 				DoSample:            true,
-				MaxNewTokens:        3072,
+				MaxNewTokens:        1024,
 				RepetitionPenalty:   1.0,
 				ReturnFullText:      false,
 				Stop:                []string{},
@@ -274,19 +274,19 @@ func queryMiners(c *Context, sources []string, query string) string {
 		r.Close = true
 		r.Header["Content-Type"] = []string{"application/json"}
 		r.Header["Connection"] = []string{"keep-alive"}
+
 		r.Header["name"] = []string{"Inference"}
 		r.Header["timeout"] = []string{"12.0"}
 		r.Header["bt_header_axon_ip"] = []string{miner.Ip}
 		r.Header["bt_header_axon_port"] = []string{strconv.Itoa(miner.Port)}
 		r.Header["bt_header_axon_hotkey"] = []string{miner.Hotkey}
 		r.Header["bt_header_dendrite_ip"] = []string{"10.0.0.1"}
-		r.Header["bt_header_dendrite_version"] = []string{"672"}
+		r.Header["bt_header_dendrite_version"] = []string{fmt.Sprint(version)}
 		r.Header["bt_header_dendrite_nonce"] = []string{strconv.Itoa(int(nonce))}
 		r.Header["bt_header_dendrite_uuid"] = []string{INSTANCE_UUID}
 		r.Header["bt_header_dendrite_hotkey"] = []string{HOTKEY}
-		r.Header["bt_header_input_obj_sources"] = []string{"W10="}
-		r.Header["bt_header_input_obj_query"] = []string{"IiI="}
 		r.Header["bt_header_dendrite_signature"] = []string{signedMessage}
+		r.Header["bt_header_input_obj_messages"] = []string{"IiI="}
 		r.Header["header_size"] = []string{"0"}
 		r.Header["total_size"] = []string{"0"}
 		r.Header["computed_body_hash"] = []string{bodyHash}

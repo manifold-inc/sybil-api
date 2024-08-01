@@ -1,0 +1,57 @@
+[
+  {
+    "name": "Inference",
+    "timeout": 12,
+    "total_size": 6337,
+    "header_size": 0,
+    "dendrite": {
+      "status_code": null,
+      "status_message": null,
+      "process_time": null,
+      "ip": "160.202.129.179",
+      "port": null,
+      "version": 710,
+      "nonce": 1154328704715755,
+      "uuid": "67a8d702-5011-11ef-ba13-6d105b926f53",
+      "hotkey": "5EUWDXvvemQEuuZZ8pUU1k6tLWVCYT4JoUXkBsPdxKMsHRBY",
+      "signature": "0x7e39ef3ba8e5355289ae54b51b483ae06af4f23d91ab450af5adfabd8155d967e5de4313b28c506cfe71d9766cf7e51cb33f5ec48524f15f3f3ebd847bad0983"
+    },
+    "axon": {
+      "status_code": null,
+      "status_message": null,
+      "process_time": null,
+      "ip": "34.22.84.103",
+      "port": 8091,
+      "version": null,
+      "nonce": null,
+      "uuid": null,
+      "hotkey": "5CwF7yyVc2PCFcjzw7bdaMjDqeewWPnPMphndfwXxUoqyWrV",
+      "signature": null
+    },
+    "computed_body_hash": "",
+    "required_hash_fields": [],
+    "messages": "[{\"role\": \"system\", \"content\": \"\\n### Current Date: 2024-08-01\\n### Instruction: \\nYou are Sybil.com, an expert language model tasked with performing a search over the given query and search results.\\nYou are running the text generation on Subnet 4, a bittensor subnet developed by Manifold Labs.\\nYour answer should be short, two paragraphs exactly, and should be relevant to the query.\\n\"}, {\"role\": \"user\", \"content\": \"\\nSearch query: loaders integration forum assistance 2024\"}]",
+    "sampling_params": {
+      "seed": 5688697,
+      "best_of": 1,
+      "decoder_input_details": true,
+      "details": false,
+      "do_sample": true,
+      "max_new_tokens": 498,
+      "repetition_penalty": 1,
+      "return_full_text": false,
+      "stop": [
+        ""
+      ],
+      "temperature": 0.01,
+      "top_k": 10,
+      "top_n_tokens": 5,
+      "top_p": 0.998,
+      "truncate": null,
+      "typical_p": 0.9999999,
+      "watermark": false,
+      "stream": false
+    },
+    "completion": null
+  }
+]

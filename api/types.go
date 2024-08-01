@@ -15,26 +15,23 @@ type Miner struct {
 	Coldkey string `json:"coldkey,omitempty"`
 }
 
-
-
 type ChatMessage struct {
-	Role string `json:"role"`
+	Role    string `json:"role"`
 	Content string `json:"content"`
 }
 
-
 type InferenceBody struct {
-	Name           string         `json:"name"`
-	Timeout        float32        `json:"timeout"`
-	TotalSize      int            `json:"total_size"`
-	HeaderSize     int            `json:"header_size"`
-	Dendrite       DendriteOrAxon `json:"dendrite"`
-	Axon           DendriteOrAxon `json:"axon"`
-	BodyHash       string         `json:"body_hash"`
-	RequiredFields []string       `json:"required_hash_fields"`
-	Messages       string         `json:"messages"`
-	SamplingParams SamplingParams `json:"sampling_params"`
-	Completion     *string        `json:"completion"`
+	Name             string         `json:"name"`
+	Timeout          float32        `json:"timeout"`
+	TotalSize        int            `json:"total_size"`
+	HeaderSize       int            `json:"header_size"`
+	Dendrite         DendriteOrAxon `json:"dendrite"`
+	Axon             DendriteOrAxon `json:"axon"`
+	ComputedBodyHash string         `json:"computed_body_hash"`
+	RequiredFields   []string       `json:"required_hash_fields"`
+	Messages         string         `json:"messages"`
+	SamplingParams   SamplingParams `json:"sampling_params"`
+	Completion       *string        `json:"completion"`
 }
 
 type DendriteOrAxon struct {

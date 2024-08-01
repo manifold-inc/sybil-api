@@ -170,10 +170,14 @@ func main() {
 		}
 
 		answer := queryMiners(cc, llmSources, query)
+		if len(answer) != 0 {
+			cc.Err.Println(answer)
+		}
 
 		// We let this run in the background
 		go saveAnswer(query, answer, llmSources, c.Request().Header.Get("X-SESSION-ID"))
 
+		cc.Info.Println("Finished")
 		return c.String(200, "")
 	})
 

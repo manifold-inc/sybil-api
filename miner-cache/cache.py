@@ -25,7 +25,7 @@ async def sync_miners(n: int):
         }
         for (axon, _) in axons
     ]
-    print("Saving new miners to cache", flush=True)
+    print(ips, flush=True)
     r.json().set("miners", obj=ips, path=Path.root_path())
     await asyncio.sleep(50 * 12)
 
