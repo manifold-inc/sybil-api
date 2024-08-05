@@ -39,7 +39,7 @@ type DendriteOrAxon struct {
 	StatusMessage *string `json:"status_message"`
 	ProcessTime   *string `json:"process_time"`
 	Ip            string  `json:"ip"`
-	Port          *string `json:"port"`
+	Port          *int    `json:"port"`
 	Version       *int    `json:"version"`
 	Nonce         *int64  `json:"nonce"`
 	Uuid          *string `json:"uuid"`
@@ -61,8 +61,9 @@ type SamplingParams struct {
 	TopP                float32  `json:"top_p"`
 	TypicalP            float32  `json:"typical_p"`
 	Watermark           bool     `json:"watermark"`
-	Seed                *string  `json:"seed"`
+	Seed                int      `json:"seed"`
 	Truncate            *string  `json:"truncate"`
+	Stream              bool  `json:"stream"`
 }
 
 type SearxResults struct {

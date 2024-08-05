@@ -206,10 +206,8 @@ func queryMiners(c *Context, sources []string, query string) string {
 
 	for index, miner := range miners {
 		message := []string{fmt.Sprint(nonce), HOTKEY, miner.Hotkey, INSTANCE_UUID, bodyHash}
-		c.Info.Println(message)
 		joinedMessage := strings.Join(message, ".")
 		signedMessage := signMessage(joinedMessage, PUBLIC_KEY, PRIVATE_KEY)
-		port := fmt.Sprint(miner.Port)
 		version := 710
 		body := InferenceBody{
 			Name:             "Inference",
@@ -240,11 +238,11 @@ func queryMiners(c *Context, sources []string, query string) string {
 				Uuid:          nil,
 				Signature:     nil,
 				Ip:            miner.Ip,
-				Port:          &port,
+				Port:          &miner.Port,
 				Hotkey:        miner.Hotkey,
 			},
 			SamplingParams: SamplingParams{
-				Seed:                nil,
+				Seed:                5688697,
 				Truncate:            nil,
 				BestOf:              1,
 				DecoderInputDetails: true,
@@ -253,13 +251,14 @@ func queryMiners(c *Context, sources []string, query string) string {
 				MaxNewTokens:        1024,
 				RepetitionPenalty:   1.0,
 				ReturnFullText:      false,
-				Stop:                []string{},
+				Stop:                []string{""},
 				Temperature:         .01,
 				TopK:                10,
 				TopNTokens:          5,
 				TopP:                .98,
 				TypicalP:            .98,
 				Watermark:           false,
+				Stream:              true,
 			},
 			Completion: nil,
 		}

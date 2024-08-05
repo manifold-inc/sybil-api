@@ -7,6 +7,7 @@ import numpy
 
 
 async def sync_miners(n: int):
+    metagraph.sync()
     indices = numpy.argsort(metagraph.incentive)[-n:]
 
     # Get the corresponding uids
@@ -27,7 +28,7 @@ async def sync_miners(n: int):
     ]
     print(ips, flush=True)
     r.json().set("miners", obj=ips, path=Path.root_path())
-    await asyncio.sleep(50 * 12)
+    await asyncio.sleep(60 * 12)
 
 
 if __name__ == "__main__":
