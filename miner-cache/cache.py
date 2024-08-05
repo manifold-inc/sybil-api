@@ -7,7 +7,7 @@ import numpy
 
 
 async def sync_miners(n: int):
-    metagraph.sync()
+    metagraph = subtensor.metagraph(netuid=4)
     indices = numpy.argsort(metagraph.incentive)[-n:]
 
     # Get the corresponding uids
@@ -33,7 +33,6 @@ async def sync_miners(n: int):
 
 if __name__ == "__main__":
     subtensor = bt.subtensor("ws://subtensor.sybil.com:9944")
-    metagraph: bt.metagraph = subtensor.metagraph(netuid=4)
     r = Redis(host="redis", port=6379, decode_responses=True)
     while True:
         asyncio.run(sync_miners(10))
