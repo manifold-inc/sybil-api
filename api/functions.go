@@ -163,9 +163,6 @@ func getTopMiners(c *Context) []Miner {
 }
 
 func queryMiners(c *Context, sources []string, query string) string {
-	if DEBUG {
-		return "No Answer"
-	}
 	// First we get our miners
 	miners := getTopMiners(c)
 	if miners == nil {
@@ -254,14 +251,6 @@ func queryMiners(c *Context, sources []string, query string) string {
 			bdy, _ := io.ReadAll(res.Body)
 			res.Body.Close()
 			c.Warn.Printf("Miner: %s %s\nError: %s\n", miner.Hotkey, miner.Coldkey, string(bdy))
-			continue
-		}
-
-		axon_version := res.Header.Get("Bt_header_axon_version")
-		ver, err := strconv.Atoi(axon_version)
-		if err != nil || ver < 672 {
-			res.Body.Close()
-			c.Warn.Printf("Miner: %s %s\nError: Axon version too low\n", miner.Hotkey, miner.Coldkey)
 			continue
 		}
 
