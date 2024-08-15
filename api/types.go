@@ -18,34 +18,21 @@ type Miner struct {
 type ChatMessage struct {
 	Role    string `json:"role"`
 	Content string `json:"content"`
+	Name    string `json:"name,omitempty"`
+}
+
+type Epistula struct {
+	Data      InferenceBody `json:"data"`
+	Nonce     int64         `json:"nonce"`
+	SignedBy  string        `json:"signed_by"`
+	SignedFor string        `json:"signed_for"`
 }
 
 type InferenceBody struct {
-	Name             string         `json:"name"`
-	Timeout          float32        `json:"timeout"`
-	TotalSize        int            `json:"total_size"`
-	HeaderSize       int            `json:"header_size"`
-	Dendrite         DendriteOrAxon `json:"dendrite"`
-	Axon             DendriteOrAxon `json:"axon"`
-	ComputedBodyHash string         `json:"computed_body_hash"`
-	RequiredFields   []string       `json:"required_hash_fields"`
-	Messages         string         `json:"messages"`
-	SamplingParams   SamplingParams `json:"sampling_params"`
-	Completion       *string        `json:"completion"`
+	Messages       []ChatMessage  `json:"messages"`
+	SamplingParams SamplingParams `json:"sampling_params"`
 }
 
-type DendriteOrAxon struct {
-	StatusCode    *string `json:"status_code"`
-	StatusMessage *string `json:"status_message"`
-	ProcessTime   *string `json:"process_time"`
-	Ip            string  `json:"ip"`
-	Port          *int    `json:"port"`
-	Version       *int    `json:"version"`
-	Nonce         *int64  `json:"nonce"`
-	Uuid          *string `json:"uuid"`
-	Hotkey        string  `json:"hotkey"`
-	Signature     *string `json:"signature"`
-}
 type SamplingParams struct {
 	BestOf              int      `json:"best_of"`
 	DecoderInputDetails bool     `json:"decoder_input_details"`
@@ -63,7 +50,7 @@ type SamplingParams struct {
 	Watermark           bool     `json:"watermark"`
 	Seed                int      `json:"seed"`
 	Truncate            *string  `json:"truncate"`
-	Stream              bool  `json:"stream"`
+	Stream              bool     `json:"stream"`
 }
 
 type SearxResults struct {
