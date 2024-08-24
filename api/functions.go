@@ -177,8 +177,6 @@ func queryMiners(c *Context, sources []string, query string) string {
 
 	httpClient := http.Client{Transport: tr, Timeout: 10 * time.Second}
 
-	nonce := time.Now().UnixNano()
-
 	now := time.Now()
 	sources_string := ""
 	for i := range sources {
@@ -196,7 +194,7 @@ func queryMiners(c *Context, sources []string, query string) string {
 
 	for index, miner := range miners {
 		body := Epistula{
-			Nonce:     nonce,
+			Nonce:     time.Now().UnixNano(),
 			SignedBy:  HOTKEY,
 			SignedFor: miner.Hotkey,
 			Data: InferenceBody{
