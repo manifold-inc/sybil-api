@@ -225,25 +225,25 @@ func queryMiners(c *Context, sources []string, query string) string {
 		}
 		timestamp := time.Now().UnixMilli()
 		uuid := uuid.New().String()
-		timestampInterval := int64(math.Ceil(float64(timestamp)/1e4)) * 1e4
+		timestampInterval := int64(math.Ceil(float64(timestamp) / 1e4))
 
-		headers := map[string]string{
-			"Epistula-Version":    "2",
-			"Epistula-Timestamp":  strconv.FormatInt(timestamp, 10),
-			"Epistula-Uuid":       uuid,
-			"Epistula-Signed-By":  HOTKEY,
-			"Epistula-Signed-For": miner.Hotkey,
-		}
-
-		// Generate request signature
 		bodyHash := sha256Hash(string(out))
 		message := fmt.Sprintf("%s.%s.%d.%s", bodyHash, uuid, timestamp, miner.Hotkey)
 		requestSignature := signMessage([]byte(message), PUBLIC_KEY, PRIVATE_KEY)
-		headers["Epistula-Request-Signature"] = requestSignature
 
-		headers["Epistula-Secret-Signature-0"] = signMessage([]byte(fmt.Sprintf("%d.%s", timestampInterval-1e4, miner.Hotkey)), PUBLIC_KEY, PRIVATE_KEY)
-		headers["Epistula-Secret-Signature-1"] = signMessage([]byte(fmt.Sprintf("%d.%s", timestampInterval, miner.Hotkey)), PUBLIC_KEY, PRIVATE_KEY)
-		headers["Epistula-Secret-Signature-2"] = signMessage([]byte(fmt.Sprintf("%d.%s", timestampInterval+1e4, miner.Hotkey)), PUBLIC_KEY, PRIVATE_KEY)
+		headers := map[string]string{
+			"Epistula-Version":            "2",
+			"Epistula-Timestamp":          fmt.Sprintf("%d", timestamp),
+			"Epistula-Uuid":               uuid,
+			"Epistula-Signed-By":          HOTKEY,
+			"Epistula-Signed-For":         miner.Hotkey,
+			"Epistula-Request-Signature":  requestSignature,
+			"Epistula-Secret-Signature-0": signMessage([]byte(fmt.Sprintf("%d.%s", timestampInterval-1, miner.Hotkey)), PUBLIC_KEY, PRIVATE_KEY),
+			"Epistula-Secret-Signature-1": signMessage([]byte(fmt.Sprintf("%d.%s", timestampInterval, miner.Hotkey)), PUBLIC_KEY, PRIVATE_KEY),
+			"Epistula-Secret-Signature-2": signMessage([]byte(fmt.Sprintf("%d.%s", timestampInterval+1, miner.Hotkey)), PUBLIC_KEY, PRIVATE_KEY),
+			"Content-Type":                "application/json",
+			"Connection":                  "keep-alive",
+		}
 
 		r, err := http.NewRequest("POST", endpoint, bytes.NewBuffer(out))
 		if err != nil {
@@ -255,10 +255,7 @@ func queryMiners(c *Context, sources []string, query string) string {
 		for key, value := range headers {
 			r.Header.Set(key, value)
 		}
-
 		r.Close = true
-		r.Header.Set("Content-Type", "application/json")
-		r.Header.Set("Connection", "keep-alive")
 
 		res, err := httpClient.Do(r)
 		if err != nil {
