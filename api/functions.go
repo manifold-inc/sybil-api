@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math"
 	"math/rand"
 	"net/http"
 	"net/url"
@@ -193,49 +194,71 @@ func queryMiners(c *Context, sources []string, query string) string {
 	`, now.Format("Mon Jan 2 15:04:05 MST 2006"), sources_string)}, {Role: "user", Content: query}}
 
 	for index, miner := range miners {
-		body := Epistula{
-			Nonce:     time.Now().UnixNano(),
-			SignedBy:  HOTKEY,
-			SignedFor: miner.Hotkey,
-			Data: InferenceBody{
-				Messages: messages,
-				SamplingParams: SamplingParams{
-					Seed:                5688697,
-					Truncate:            nil,
-					BestOf:              1,
-					DecoderInputDetails: true,
-					Details:             false,
-					DoSample:            true,
-					MaxNewTokens:        4048,
-					RepetitionPenalty:   1.0,
-					ReturnFullText:      false,
-					Stop:                []string{""},
-					Temperature:         .01,
-					TopK:                10,
-					TopNTokens:          5,
-					TopP:                .98,
-					TypicalP:            .98,
-					Watermark:           false,
-					Stream:              true,
-				},
+		body := InferenceBody{
+			Messages: messages,
+			SamplingParams: SamplingParams{
+				Seed:                5688697,
+				Truncate:            nil,
+				BestOf:              1,
+				DecoderInputDetails: true,
+				Details:             false,
+				DoSample:            true,
+				MaxNewTokens:        4048,
+				RepetitionPenalty:   1.0,
+				ReturnFullText:      false,
+				Stop:                []string{""},
+				Temperature:         .01,
+				TopK:                10,
+				TopNTokens:          5,
+				TopP:                .98,
+				TypicalP:            .98,
+				Watermark:           false,
+				Stream:              true,
 			},
 		}
+
 		endpoint := "http://" + miner.Ip + ":" + fmt.Sprint(miner.Port) + "/inference"
 		out, err := json.Marshal(body)
 		if err != nil {
 			c.Warn.Printf("Failed to parse json %s", err.Error())
 			continue
 		}
-		signedMessage := signMessage(out, PUBLIC_KEY, PRIVATE_KEY)
+		timestamp := time.Now().UnixMilli()
+		uuid := uuid.New().String()
+		timestampInterval := int64(math.Ceil(float64(timestamp)/1e4)) * 1e4
+
+		headers := map[string]string{
+			"Epistula-Version":    "2",
+			"Epistula-Timestamp":  strconv.FormatInt(timestamp, 10),
+			"Epistula-Uuid":       uuid,
+			"Epistula-Signed-By":  HOTKEY,
+			"Epistula-Signed-For": miner.Hotkey,
+		}
+
+		// Generate request signature
+		bodyHash := sha256Hash(string(out))
+		message := fmt.Sprintf("%s.%s.%d.%s", bodyHash, uuid, timestamp, miner.Hotkey)
+		requestSignature := signMessage([]byte(message), PUBLIC_KEY, PRIVATE_KEY)
+		headers["Epistula-Request-Signature"] = requestSignature
+
+		headers["Epistula-Secret-Signature-0"] = signMessage([]byte(fmt.Sprintf("%d.%s", timestampInterval-1e4, miner.Hotkey)), PUBLIC_KEY, PRIVATE_KEY)
+		headers["Epistula-Secret-Signature-1"] = signMessage([]byte(fmt.Sprintf("%d.%s", timestampInterval, miner.Hotkey)), PUBLIC_KEY, PRIVATE_KEY)
+		headers["Epistula-Secret-Signature-2"] = signMessage([]byte(fmt.Sprintf("%d.%s", timestampInterval+1e4, miner.Hotkey)), PUBLIC_KEY, PRIVATE_KEY)
+
 		r, err := http.NewRequest("POST", endpoint, bytes.NewBuffer(out))
 		if err != nil {
 			c.Warn.Printf("Failed miner request: %s\n", err.Error())
 			continue
 		}
+
+		// Set headers
+		for key, value := range headers {
+			r.Header.Set(key, value)
+		}
+
 		r.Close = true
-		r.Header["Content-Type"] = []string{"application/json"}
-		r.Header["Connection"] = []string{"keep-alive"}
-		r.Header["Body-Signature"] = []string{signedMessage}
+		r.Header.Set("Content-Type", "application/json")
+		r.Header.Set("Connection", "keep-alive")
 
 		res, err := httpClient.Do(r)
 		if err != nil {

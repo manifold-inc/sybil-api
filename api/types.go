@@ -21,13 +21,6 @@ type ChatMessage struct {
 	Name    string `json:"name,omitempty"`
 }
 
-type Epistula struct {
-	Data      InferenceBody `json:"data"`
-	Nonce     int64         `json:"nonce"`
-	SignedBy  string        `json:"signed_by"`
-	SignedFor string        `json:"signed_for"`
-}
-
 type InferenceBody struct {
 	Messages       []ChatMessage  `json:"messages"`
 	SamplingParams SamplingParams `json:"sampling_params"`
