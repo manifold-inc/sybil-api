@@ -1,0 +1,68 @@
+services:
+  api:
+    image: manifoldlabs/sybil-api:latest
+    healthcheck: 
+      test: ["CMD", "curl", "-f", "-X", "GET", "http://localhost/ping"]
+      interval: "1s"
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.api.rule=Host(`mx-central-02.sybil.com`)
+      - traefik.http.routers.api.tls=true
+      - traefik.http.routers.api.tls.certresolver=letsencrypt
+      - traefik.http.services.api.loadbalancer.server.port=80
+    env_file: .env
+    restart: always
+    depends_on:
+      searxng:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  miner-cache:
+    image: manifoldlabs/sybil-miner-cache:latest
+    restart: always
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  redis:
+    image: redis/redis-stack-server:latest
+    restart: always
+    healthcheck:
+      test: [ "CMD", "redis-cli", "--raw", "incr", "ping" ]
+      interval: "3s"
+    volumes: 
+      - cache:/data
+
+  searxng:
+    image: docker.io/searxng/searxng:latest
+    healthcheck:
+      test: wget --no-verbose --tries=1 --spider http://0.0.0.0:8080 || exit 1
+      interval: 2s
+    restart: always
+    volumes:
+      - ./searxng:/etc/searxng:rw
+    environment:
+      - SEARXNG_BASE_URL=http://localhost:8080/
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "1m"
+        max-file: "1"
+
+  traefik:
+    image: traefik:v2.3
+    ports:
+      - 80:80
+      - 443:443
+    restart: always
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./traefik/traefik.toml:/etc/traefik/traefik.toml
+      - traefik-public-certificates:/certificates
+
+volumes:
+  traefik-public-certificates:
+  searx-data:
+  cache:
+    driver: local
