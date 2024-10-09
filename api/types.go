@@ -21,6 +21,19 @@ type ChatMessage struct {
 	Name    string `json:"name,omitempty"`
 }
 
+type Response struct {
+	Id      string   `json:"id"`
+	Object  string   `json:"object"`
+	Model   string   `json:"model"`
+	Choices []Choice `json:"choices"`
+}
+type Choice struct {
+	Delta Delta `json:"delta"`
+}
+type Delta struct {
+	Content string `json:"content"`
+}
+
 type InferenceBody struct {
 	Messages    []ChatMessage `json:"messages"`
 	Temperature float32       `json:"temperature"`

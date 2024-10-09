@@ -26,6 +26,8 @@ var (
 	INSTANCE_UUID string
 	DSN           string
 	DEBUG         bool
+	TARGON_HUB_ENDPOINT string
+	TARGON_HUB_ENDPOINT_API_KEY string
 
 	db     *sql.DB
 	client *redis.Client
@@ -54,6 +56,8 @@ func main() {
 	PRIVATE_KEY = safeEnv("PRIVATE_KEY")
 	DSN = safeEnv("DSN")
 	SEARX_URL = "http://searxng:8080/"
+	TARGON_HUB_ENDPOINT = safeEnv("TARGON_HUB_ENDPOINT")
+	TARGON_HUB_ENDPOINT_API_KEY = safeEnv("TARGON_HUB_ENDPOINT_API_KEY")
 	INSTANCE_UUID = uuid.New().String()
 	debug, present := os.LookupEnv("DEBUG")
 	if !present {
