@@ -27,6 +27,7 @@ type Response struct {
 	Model   string   `json:"model"`
 	Choices []Choice `json:"choices"`
 }
+
 type Choice struct {
 	Delta Delta `json:"delta"`
 }

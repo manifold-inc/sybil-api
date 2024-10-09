@@ -149,8 +149,12 @@ func queryMiners(c *Context, sources []string, query string) string {
 		default:
 			token := reader.Text()
 			if token == "data: [DONE]" {
-				fmt.Fprintf(c.Response(), "data: "+token+"\n\n")
 				finished = true
+				sendEvent(c, map[string]any{
+					"type":     "answer",
+					"text":     "",
+					"finished": finished,
+				})
 				return responseText
 			}
 			token, found := strings.CutPrefix(token, "data: ")
@@ -164,8 +168,12 @@ func queryMiners(c *Context, sources []string, query string) string {
 				continue
 			}
 			content := response.Choices[0].Delta.Content
-			fmt.Fprintf(c.Response(), "data: %s", content)
-			c.Response().Flush()
+			c.Info.Println(content)
+			sendEvent(c, map[string]any{
+				"type":     "answer",
+				"text":     content,
+				"finished": finished,
+			})
 			responseText += content
 		}
 	}
