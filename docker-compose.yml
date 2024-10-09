@@ -18,13 +18,6 @@ services:
       redis:
         condition: service_healthy
 
-  miner-cache:
-    image: manifoldlabs/sybil-miner-cache:latest
-    restart: always
-    depends_on:
-      redis:
-        condition: service_healthy
-
   redis:
     image: redis/redis-stack-server:latest
     restart: always

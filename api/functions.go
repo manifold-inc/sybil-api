@@ -70,7 +70,7 @@ func sendEvent(c *Context, data map[string]any) {
 	c.Response().Flush()
 }
 
-func queryMiners(c *Context, sources []string, query string) string {
+func queryTargon(c *Context, sources []string, query string) string {
 	tr := &http.Transport{
 		MaxIdleConns:      10,
 		IdleConnTimeout:   30 * time.Second,

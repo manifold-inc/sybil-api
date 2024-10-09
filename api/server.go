@@ -179,7 +179,7 @@ func main() {
 			})
 		}
 
-		answer := queryMiners(cc, llmSources, query)
+		answer := queryTargon(cc, llmSources, query)
 		// We let this run in the background
 		go saveAnswer(query, answer, llmSources, c.Request().Header.Get("X-SESSION-ID"))
 
