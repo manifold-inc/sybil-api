@@ -41,7 +41,4 @@ networks:
     external: true
 
 volumes:
-  traefik-public-certificates:
   searx-data:
-  cache:
-    driver: local
