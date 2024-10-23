@@ -77,7 +77,7 @@ func queryTargon(c *Context, sources []string, query string) string {
 		DisableKeepAlives: false,
 	}
 
-	httpClient := http.Client{Transport: tr, Timeout: 10 * time.Second}
+	httpClient := http.Client{Transport: tr, Timeout: 15 * time.Second}
 
 	now := time.Now()
 	sources_string := ""
