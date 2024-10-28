@@ -328,3 +328,38 @@ func saveAnswer(query string, answer string, sources []string, session string) {
 	}
 	log.Println("Inserted Results")
 }
+
+func sendErrorToEndon(cc *Context, err error, endpoint string) {
+	payload := map[string]interface{}{
+		"error":     err.Error(),
+		"endpoint":  endpoint,
+		"timestamp": time.Now().Unix(),
+	}
+
+	jsonData, jsonErr := json.Marshal(payload)
+	if jsonErr != nil {
+		cc.Err.Printf("Failed to marshal error payload: %v", jsonErr)
+		return
+	}
+
+	client := &http.Client{}
+
+	req, reqErr := http.NewRequest(http.MethodPost, ENDON_URL, bytes.NewBuffer(jsonData))
+	if reqErr != nil {
+		cc.Err.Printf("Failed to create Endon request: %v", reqErr)
+		return
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, respErr := client.Do(req)
+	if respErr != nil {
+		cc.Err.Printf("Failed to send error to Endon: %v", respErr)
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		cc.Err.Printf("Failed to report error to Endon. Status: %d", resp.StatusCode)
+	}
+}

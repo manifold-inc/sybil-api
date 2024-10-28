@@ -22,6 +22,7 @@ var (
 	HOTKEY        string
 	PUBLIC_KEY    string
 	PRIVATE_KEY   string
+	ENDON_URL     string
 	SEARX_URL     string
 	INSTANCE_UUID string
 	DSN           string
@@ -52,6 +53,7 @@ func main() {
 	HOTKEY = safeEnv("HOTKEY")
 	PUBLIC_KEY = safeEnv("PUBLIC_KEY")
 	PRIVATE_KEY = safeEnv("PRIVATE_KEY")
+	ENDON_URL = safeEnv("ENDON_URL")
 	DSN = safeEnv("DSN")
 	SEARX_URL = "http://searxng:8080/"
 	INSTANCE_UUID = uuid.New().String()
@@ -109,11 +111,13 @@ func main() {
 		err = json.NewDecoder(c.Request().Body).Decode(&requestBody)
 		query := requestBody.Query
 		if err != nil {
+			sendErrorToEndon(cc, err, "/search/images")
 			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 		}
 		cc.Info.Printf("/search/images: %s, page: %d\n", query, requestBody.Page)
 		search, err := querySearx(cc, query, "images", requestBody.Page)
 		if err != nil {
+			sendErrorToEndon(cc, err, "/search/images")
 			return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 		}
 		return c.JSON(200, search.Results)
@@ -129,11 +133,13 @@ func main() {
 		err = json.NewDecoder(c.Request().Body).Decode(&requestBody)
 		if err != nil {
 			log.Println("Error decoding json")
+			sendErrorToEndon(cc, err, "/search")
 			return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 		}
 		query := requestBody.Query
 		if len(query) == 0 {
 			cc.Warn.Println("No query")
+			sendErrorToEndon(cc, fmt.Errorf("no query"), "/search")
 			return echo.NewHTTPError(http.StatusBadRequest, "No query found")
 		}
 
@@ -146,6 +152,7 @@ func main() {
 
 		general, err := querySearx(cc, query, "general", 1)
 		if err != nil {
+			sendErrorToEndon(cc, err, "/search")
 			return c.String(500, "")
 		}
 
@@ -184,6 +191,7 @@ func main() {
 	})
 
 	e.GET("/search/autocomplete", func(c echo.Context) error {
+		cc := c.(*Context)
 
 		client := &http.Client{}
 		query := c.QueryParam("q")
@@ -196,11 +204,13 @@ func main() {
 
 		if err != nil {
 			log.Printf("Search Error: %s\n", err.Error())
+			sendErrorToEndon(cc, err, "/search/autocomplete")
 			return c.String(500, "Search Failed")
 		}
 		defer res.Body.Close()
 		if res.StatusCode != http.StatusOK {
 			log.Printf("Search Error: %x\n", res.StatusCode)
+			sendErrorToEndon(cc, fmt.Errorf("searx returned status code: %d", res.StatusCode), "/search/autocomplete")
 			return c.String(500, "Search failed")
 		}
 		var resp []interface{}
@@ -219,11 +229,13 @@ func main() {
 		err = json.NewDecoder(c.Request().Body).Decode(&requestBody)
 		query := requestBody.Query
 		if err != nil {
+			sendErrorToEndon(cc, err, "/search/sources")
 			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 		}
 		cc.Info.Printf("/search/sources: %s, page: %d\n", query, requestBody.Page)
 		search, err := querySearx(cc, query, "general", requestBody.Page)
 		if err != nil {
+			sendErrorToEndon(cc, err, "/search/sources")
 			return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 		}
 		return c.JSON(200, search.Results)
