@@ -333,7 +333,7 @@ func sendErrorToEndon(err error, endpoint string) {
 	payload := map[string]interface{}{
 		"error":     err.Error(),
 		"endpoint":  endpoint,
-		"timestamp": time.Now().Unix(),
+		"timestamp": float64(time.Now().UnixNano()) / 1e9,
 	}
 
 	jsonData, jsonErr := json.Marshal(payload)
@@ -362,4 +362,6 @@ func sendErrorToEndon(err error, endpoint string) {
 	if resp.StatusCode >= 400 {
 		fmt.Printf("Failed to report error to Endon. Status: %d", resp.StatusCode)
 	}
+
+	fmt.Printf("Successfully sent error to Endon: %s", endpoint)
 }
