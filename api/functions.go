@@ -331,7 +331,7 @@ func saveAnswer(query string, answer string, sources []string, session string) {
 
 func sendErrorToEndon(err error, endpoint string) {
 	payload := ErrorReport{
-		Service:  "sybil",
+		Service:  "sybil-api",
 		Endpoint: endpoint,
 		Error:    err.Error(),
 	}
