@@ -111,13 +111,13 @@ func main() {
 		err = json.NewDecoder(c.Request().Body).Decode(&requestBody)
 		query := requestBody.Query
 		if err != nil {
-			sendErrorToEndon(err, "sybil-search_images")
+			sendErrorToEndon(err, "/search/images")
 			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 		}
 		cc.Info.Printf("/search/images: %s, page: %d\n", query, requestBody.Page)
 		search, err := querySearx(cc, query, "images", requestBody.Page)
 		if err != nil {
-			sendErrorToEndon(err, "sybil-search_images")
+			sendErrorToEndon(err, "/search/images")
 			return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 		}
 		return c.JSON(200, search.Results)
@@ -133,13 +133,13 @@ func main() {
 		err = json.NewDecoder(c.Request().Body).Decode(&requestBody)
 		if err != nil {
 			log.Println("Error decoding json")
-			sendErrorToEndon(err, "sybil-search")
+			sendErrorToEndon(err, "/search")
 			return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 		}
 		query := requestBody.Query
 		if len(query) == 0 {
 			cc.Warn.Println("No query")
-			sendErrorToEndon(fmt.Errorf("no query"), "sybil-search")
+			sendErrorToEndon(fmt.Errorf("no query"), "/search")
 			return echo.NewHTTPError(http.StatusBadRequest, "No query found")
 		}
 
@@ -152,7 +152,7 @@ func main() {
 
 		general, err := querySearx(cc, query, "general", 1)
 		if err != nil {
-			sendErrorToEndon(err, "sybil-search")
+			sendErrorToEndon(err, "/search")
 			return c.String(500, "")
 		}
 
@@ -202,7 +202,7 @@ func main() {
 
 		if err != nil {
 			log.Printf("Search Error: %s\n", err.Error())
-			sendErrorToEndon(err, "sybil-search_autocomplete")
+			sendErrorToEndon(err, "/search/autocomplete")
 			return c.String(500, "Search Failed")
 		}
 		defer res.Body.Close()
@@ -227,13 +227,13 @@ func main() {
 		err = json.NewDecoder(c.Request().Body).Decode(&requestBody)
 		query := requestBody.Query
 		if err != nil {
-			sendErrorToEndon(err, "sybil-search_sources")
+			sendErrorToEndon(err, "/search/sources")
 			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 		}
 		cc.Info.Printf("/search/sources: %s, page: %d\n", query, requestBody.Page)
 		search, err := querySearx(cc, query, "general", requestBody.Page)
 		if err != nil {
-			sendErrorToEndon(err, "sybil-search_sources")
+			sendErrorToEndon(err, "/search/sources")
 			return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 		}
 		return c.JSON(200, search.Results)

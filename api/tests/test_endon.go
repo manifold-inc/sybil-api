@@ -4,10 +4,18 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"os"
 	"time"
 )
+
+type ErrorReport struct {
+	Service   string `json:"service"`
+	Endpoint  string `json:"endpoint"`
+	Error     string `json:"error"`
+	Traceback string `json:"traceback,omitempty"`
+}
 
 func testEndon(ENDON_URL string) {
 	// Create a test error
@@ -18,24 +26,22 @@ func testEndon(ENDON_URL string) {
 }
 
 func sendErrorToEndon(ENDON_URL string, err error, endpoint string) {
-
-	payload := map[string]interface{}{
-		"error":     err.Error(),
-		"endpoint":  endpoint,
-		"timestamp": float64(time.Now().UnixNano()) / 1e9,
+	payload := ErrorReport{
+		Service:  "sybil",
+		Endpoint: endpoint,
+		Error:    err.Error(),
 	}
 
 	jsonData, jsonErr := json.Marshal(payload)
 	if jsonErr != nil {
-		fmt.Printf("Failed to marshal error payload: %v", jsonErr)
+		log.Printf("Failed to marshal error payload: %v\n", jsonErr)
 		return
 	}
 
-	client := &http.Client{}
-
+	client := &http.Client{Timeout: 10 * time.Second}
 	req, reqErr := http.NewRequest(http.MethodPost, ENDON_URL, bytes.NewBuffer(jsonData))
 	if reqErr != nil {
-		fmt.Printf("Failed to create Endon request: %v", reqErr)
+		log.Printf("Failed to create Endon request: %v\n", reqErr)
 		return
 	}
 
@@ -43,16 +49,17 @@ func sendErrorToEndon(ENDON_URL string, err error, endpoint string) {
 
 	resp, respErr := client.Do(req)
 	if respErr != nil {
-		fmt.Printf("Failed to send error to Endon: %v", respErr)
+		log.Printf("Failed to send error to Endon: %v\n", respErr)
 		return
 	}
-
-	fmt.Printf("Successfully sent error to Endon")
 	defer resp.Body.Close()
 
 	if resp.StatusCode >= 400 {
-		fmt.Printf("Failed to report error to Endon. Status: %d", resp.StatusCode)
+		log.Printf("Failed to report error to Endon. Status: %d\n", resp.StatusCode)
+		return
 	}
+
+	fmt.Printf("Successfully sent error to Endon: %s\n", endpoint)
 }
 
 func main() {
