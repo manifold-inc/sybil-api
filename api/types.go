@@ -55,3 +55,10 @@ type Event struct {
 	Retry int                    `json:"retry"`
 	Data  map[string]interface{} `json:"data"`
 }
+
+type ErrorReport struct {
+	Service   string `json:"service"`
+	Endpoint  string `json:"endpoint"`
+	Error     string `json:"error"`
+	Traceback string `json:"traceback,omitempty"`
+}
