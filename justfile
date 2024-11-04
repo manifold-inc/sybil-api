@@ -32,8 +32,8 @@ down:
   @docker compose down
 
 push: (build)
+  export VERSION=$(git rev-parse --short HEAD) && docker compose -f docker-compose.build.yml build
+  export VERSION=$(git rev-parse --short HEAD) && docker compose -f docker-compose.build.yml push
   docker compose -f docker-compose.build.yml build
   docker compose -f docker-compose.build.yml push
 
-print:
-  @printf " {{GREEN}}{{CHECK}} Images Started {{CHECK}} {{RESET}}"
