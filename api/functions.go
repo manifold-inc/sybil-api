@@ -168,7 +168,6 @@ func queryTargon(c *Context, sources []string, query string) string {
 				continue
 			}
 			content := response.Choices[0].Delta.Content
-			c.Info.Println(content)
 			sendEvent(c, map[string]any{
 				"type":     "answer",
 				"text":     content,
