@@ -100,7 +100,7 @@ func queryTargon(c *Context, sources []string, query string) string {
 		Temperature: .3,
 		Stream:      true,
 		Logprobs:    true,
-		Model:       "NousResearch/Meta-Llama-3.1-8B-Instruct",
+		Model:       "nvidia/Llama-3.1-Nemotron-70B-Instruct-HF",
 	}
 
 	endpoint := TARGON_HUB_ENDPOINT + "/chat/completions"
