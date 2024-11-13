@@ -13,6 +13,7 @@ services:
       - traefik.http.routers.api.tls.certresolver=
       - traefik.http.services.api.loadbalancer.server.port=80
   traefik:
+    image: traefik:v2.3
     ports:
       - 80:80
     restart: always
