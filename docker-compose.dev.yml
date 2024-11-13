@@ -1,5 +1,13 @@
 services:
   api:
+    image: manifoldlabs/sybil-api:latest
+    healthcheck: 
+      test: ["CMD", "curl", "-f", "-X", "GET", "http://localhost/ping"]
+      interval: "1s"
+    env_file: .env
+    depends_on:
+      searxng:
+        condition: service_healthy
     build:
       context: ./api
       platforms: 
@@ -20,6 +28,24 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - $PWD/traefik/traefik.dev.toml:/etc/traefik/traefik.toml
+
   searxng:
+    image: docker.io/searxng/searxng:latest
+    healthcheck:
+      test: wget --no-verbose --tries=1 --spider http://0.0.0.0:8080 || exit 1
+      interval: 2s
+    restart: always
+    volumes:
+      - ./searxng:/etc/searxng:rw
+    environment:
+      - SEARXNG_BASE_URL=http://localhost:8080/
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "1m"
+        max-file: "1"
     ports:
       - 8080:8080
+
+volumes:
+  searx-data:

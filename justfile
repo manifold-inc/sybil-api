@@ -16,7 +16,7 @@ pull:
   @git pull
 
 up extra='': (build "-f docker-compose.yml -f docker-compose.dev.yml")
-  docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d {{extra}}
+  docker compose -f docker-compose.dev.yml up -d {{extra}}
   @printf " {{GREEN}}{{CHECK}} Images Started {{CHECK}} {{RESET}}"
 
 prod image:
@@ -29,7 +29,7 @@ upgrade: pull build
   @printf " {{GREEN}}{{CHECK}} Images Started {{CHECK}} {{RESET}}"
 
 down:
-  @docker compose down
+  @docker compose -f docker-compose.dev.yml down
 
 push: (build)
   export VERSION=$(git rev-parse --short HEAD) && docker compose -f docker-compose.build.yml build
