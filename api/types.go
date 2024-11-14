@@ -42,3 +42,13 @@ type ErrorReport struct {
 	Error     string `json:"error"`
 	Traceback string `json:"traceback,omitempty"`
 }
+
+
+type UrlSource struct {
+	URL           string   `json:"url"`
+	Thumbnail     *string  `json:"thumbnail,omitempty"`
+	Title         string   `json:"title"`
+	ParsedURL     []string `json:"parsed_url"`
+	Content       *string  `json:"content,omitempty"`
+	PublishedDate *string  `json:"publishedDate,omitempty"`
+}

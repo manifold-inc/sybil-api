@@ -16,7 +16,7 @@ pull:
   @git pull
 
 up extra='': (build "-f docker-compose.yml -f docker-compose.dev.yml")
-  docker compose -f docker-compose.dev.yml up -d {{extra}}
+  docker compose -f docker-compose.dev.yml up {{extra}}
   @printf " {{GREEN}}{{CHECK}} Images Started {{CHECK}} {{RESET}}"
 
 prod image:

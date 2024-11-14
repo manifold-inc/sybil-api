@@ -166,10 +166,22 @@ func main() {
 			sendErrorToEndon(err, "/search")
 			return c.String(500, "")
 		}
+		var urlSources []UrlSource
+		for _, result := range generalResults.Web.Results {
+			urlSource := UrlSource{
+				URL:           result.URL,
+				Thumbnail:     &result.Thumbnail.Original,
+				Title:         result.Title,
+				ParsedURL:     []string{result.URL},
+				Content:       &result.Description,
+				PublishedDate: nil,
+			}
+			urlSources = append(urlSources, urlSource)
+		}
 
 		sendEvent(cc, map[string]interface{}{
 			"type":    "sources",
-			"sources": generalResults.Web.Results,
+			"sources": urlSources,
 		})
 		sendEvent(cc, map[string]interface{}{
 			"type":      "related",
@@ -204,7 +216,12 @@ func main() {
 	e.GET("/search/autocomplete", func(c echo.Context) error {
 		client := &http.Client{}
 		query := c.QueryParam("q")
-		req, err := http.NewRequest(http.MethodGet, "/autocompleter", nil)
+		req, err := http.NewRequest(http.MethodGet, "https://search.brave.com/api/suggest", nil)
+		if err != nil {
+			sendErrorToEndon(err, "/search/autocomplete")
+			return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		}
+		
 		q := req.URL.Query()
 		q.Add("q", query)
 		req.URL.RawQuery = q.Encode()
@@ -247,6 +264,7 @@ func main() {
 			sendErrorToEndon(err, "/search/sources")
 			return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 		}
+
 		return c.JSON(200, search.Web.Results)
 	})
 	e.Logger.Fatal(e.Start(":80"))
