@@ -5,17 +5,16 @@ import (
 	"bytes"
 	"database/sql"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"log"
 	"net/http"
-	"net/url"
 	"os"
 	"strings"
 	"time"
 
 	"github.com/aidarkhanov/nanoid"
 	"github.com/google/uuid"
+	brave "dev.freespoke.com/brave-search"
 )
 
 func derefString(s *string) string {
@@ -35,28 +34,42 @@ func safeEnv(env string) string {
 	return res
 }
 
-func querySearx(c *Context, query string, categories string, page int) (*SearxResponseBody, error) {
-	res, err := http.PostForm(SEARX_URL+"/search", url.Values{
-		"q":          {query},
-		"format":     {"json"},
-		"pageno":     {fmt.Sprint(page)},
-		"categories": {categories},
-	})
-
+func QueryBraveWeb(cc *Context, query string, vertical string, page int) (*brave.ResultContainer[brave.WebSearchResult], error) {
+	client, err := brave.New(safeEnv("BRAVE_API_KEY"))
 	if err != nil {
-		c.Err.Printf("Search Error: %s\n", err.Error())
+		cc.Err.Printf("Failed to create brave client: %s\n", err.Error())
 		return nil, err
 	}
-	defer res.Body.Close()
-	if res.StatusCode != http.StatusOK {
-		c.Err.Printf("Search Error. Status code: %d\n", res.StatusCode)
-		return nil, errors.New("Search Failed")
+	var res *brave.WebSearchResult
+	if vertical == "images" {
+		return nil, fmt.Errorf("images category not supported in web search")
+	} else {
+		res, err = client.WebSearch(cc.Request().Context(), query)
 	}
 
-	var resp SearxResponseBody
-	json.NewDecoder(res.Body).Decode(&resp)
-	return &resp, nil
+	if err != nil {
+		cc.Err.Printf("Failed to query brave: %s\n", err.Error())
+		return nil, err
+	}
+
+	fmt.Println(res)
+	return res, nil
 }
+
+func QueryBraveImages(cc *Context, query string, page int) (*brave.ImageSearchResult, error) {
+	client, err := brave.New(safeEnv("BRAVE_API_KEY"))
+	if err != nil {
+		cc.Err.Printf("Failed to create brave client: %s\n", err.Error())
+		return nil, err
+	}
+	res, err := client.ImageSearch(cc.Request().Context(), query)
+	if err != nil {
+		cc.Err.Printf("Failed to query brave: %s\n", err.Error())
+		return nil, err
+	}
+	return res, nil
+}
+
 
 func sendEvent(c *Context, data map[string]any) {
 	// Send SSE event to response

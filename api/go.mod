@@ -1,6 +1,6 @@
 module api.go
 
-go 1.22.0
+go 1.22
 
 require (
 	github.com/aidarkhanov/nanoid v1.0.8
@@ -11,10 +11,14 @@ require (
 )
 
 require (
+	dev.freespoke.com/brave-search v0.3.1 // indirect
 	filippo.io/edwards25519 v1.1.0 // indirect
 	github.com/cespare/xxhash/v2 v2.2.0 // indirect
 	github.com/dgryski/go-rendezvous v0.0.0-20200823014737-9f7001d12a5f // indirect
 	github.com/golang-jwt/jwt v3.2.2+incompatible // indirect
+	github.com/google/go-querystring v1.1.0 // indirect
+	github.com/ijt/go-anytime v1.9.2 // indirect
+	github.com/ijt/goparsify v0.0.0-20221203142333-3a5276334b8d // indirect
 	github.com/labstack/gommon v0.4.2 // indirect
 	github.com/mattn/go-colorable v0.1.13 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect

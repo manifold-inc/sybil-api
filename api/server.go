@@ -16,6 +16,7 @@ import (
 	"github.com/labstack/echo/v4/middleware"
 
 	"github.com/redis/go-redis/v9"
+	brave "dev.freespoke.com/brave-search"
 )
 
 var (
@@ -112,19 +113,20 @@ func main() {
 			Page  int    `json:"page"`
 		}
 		var requestBody RequestBody
-		err = json.NewDecoder(c.Request().Body).Decode(&requestBody)
-		query := requestBody.Query
+		err := json.NewDecoder(c.Request().Body).Decode(&requestBody)
 		if err != nil {
 			sendErrorToEndon(err, "/search/images")
 			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 		}
+		query := requestBody.Query
 		cc.Info.Printf("/search/images: %s, page: %d\n", query, requestBody.Page)
-		search, err := querySearx(cc, query, "images", requestBody.Page)
+
+		searchResults, err := QueryBraveImages(cc, query, requestBody.Page)
 		if err != nil {
 			sendErrorToEndon(err, "/search/images")
 			return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 		}
-		return c.JSON(200, search.Results)
+		return c.JSON(200, searchResults.Results)
 	})
 
 	e.POST("/search", func(c echo.Context) error {
@@ -132,17 +134,16 @@ func main() {
 		type RequestBody struct {
 			Query string `json:"query"`
 		}
-		cc.Request().Header.Add("Content-Type", "application/json")
 		var requestBody RequestBody
-		err = json.NewDecoder(c.Request().Body).Decode(&requestBody)
+		err := json.NewDecoder(c.Request().Body).Decode(&requestBody)
 		if err != nil {
-			log.Println("Error decoding json")
+			cc.Err.Println("Error decoding JSON:", err)
 			sendErrorToEndon(err, "/search")
 			return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 		}
 		query := requestBody.Query
 		if len(query) == 0 {
-			cc.Warn.Println("No query")
+			cc.Warn.Println("No query provided")
 			sendErrorToEndon(fmt.Errorf("no query"), "/search")
 			return echo.NewHTTPError(http.StatusBadRequest, "No query found")
 		}
@@ -154,40 +155,40 @@ func main() {
 
 		cc.Info.Printf("/search: %s\n", query)
 
-		general, err := querySearx(cc, query, "general", 1)
+		generalResults, err := QueryBraveWeb(cc, query, "general", 1)
 		if err != nil {
 			sendErrorToEndon(err, "/search")
 			return c.String(500, "")
 		}
 
-		sendEvent(cc, map[string]any{
+		sendEvent(cc, map[string]interface{}{
 			"type":    "sources",
-			"sources": general.Results,
+			"sources": generalResults.Results,
 		})
-		sendEvent(cc, map[string]any{
+		sendEvent(cc, map[string]interface{}{
 			"type":      "related",
-			"followups": general.Suggestions,
+			"followups": generalResults.Suggestions,
 		})
 
-		llmSources := []string{}
-		if len(general.Results) != 0 {
-			herocard := general.Results[0]
-			llmSources = append(llmSources, fmt.Sprintf("Title: %s:\nSnippet: %s\n", derefString(general.Results[0].Title), derefString(general.Results[0].Content)))
-			sendEvent(cc, map[string]any{
+		var llmSources []string
+		if len(generalResults.Results) != 0 {
+			heroCard := generalResults.Results[0]
+			llmSources = append(llmSources, fmt.Sprintf("Title: %s\nSnippet: %s\n", heroCard.Title, heroCard.Description))
+			sendEvent(cc, map[string]interface{}{
 				"type": "heroCard",
-				"heroCard": map[string]any{
+				"heroCard": map[string]interface{}{
 					"type":  "news",
-					"url":   *herocard.Url,
-					"image": herocard.Thumbnail,
-					"title": *herocard.Title,
-					"intro": *herocard.Content,
+					"url":   heroCard.URL,
+					"image": heroCard.Thumbnail,
+					"title": heroCard.Title,
+					"intro": heroCard.Description,
 					"size":  "auto",
 				},
 			})
 		}
 
 		answer := queryTargon(cc, llmSources, query)
-		// We let this run in the background
+		// Run saveAnswer in the background
 		go saveAnswer(query, answer, llmSources, c.Request().Header.Get("X-SESSION-ID"))
 
 		cc.Info.Println("Finished")
@@ -235,7 +236,7 @@ func main() {
 			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 		}
 		cc.Info.Printf("/search/sources: %s, page: %d\n", query, requestBody.Page)
-		search, err := querySearx(cc, query, "general", requestBody.Page)
+		search, err := QueryBraveWeb(cc, query, "general", requestBody.Page)
 		if err != nil {
 			sendErrorToEndon(err, "/search/sources")
 			return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
