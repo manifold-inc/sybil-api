@@ -46,9 +46,9 @@ type ErrorReport struct {
 
 type UrlSource struct {
 	URL           string   `json:"url"`
-	Thumbnail     *string  `json:"thumbnail,omitempty"`
+	Thumbnail     string  `json:"thumbnail,omitempty"`
 	Title         string   `json:"title"`
 	ParsedURL     []string `json:"parsed_url"`
-	Content       *string  `json:"content,omitempty"`
+	Content       string  `json:"content,omitempty"`
 	PublishedDate *string  `json:"publishedDate,omitempty"`
 }

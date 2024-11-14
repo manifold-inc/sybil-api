@@ -170,10 +170,10 @@ func main() {
 		for _, result := range generalResults.Web.Results {
 			urlSource := UrlSource{
 				URL:           result.URL,
-				Thumbnail:     &result.Thumbnail.Original,
+				Thumbnail:     result.Thumbnail.Original,
 				Title:         result.Title,
 				ParsedURL:     []string{result.URL},
-				Content:       &result.Description,
+				Content:       result.Description,
 				PublishedDate: nil,
 			}
 			urlSources = append(urlSources, urlSource)
