@@ -34,18 +34,12 @@ func safeEnv(env string) string {
 	return res
 }
 
-func QueryBraveWeb(cc *Context, query string, vertical string, page int) (*brave.ResultContainer[brave.WebSearchResult], error) {
-	client, err := brave.New(safeEnv("BRAVE_API_KEY"))
-	if err != nil {
-		cc.Err.Printf("Failed to create brave client: %s\n", err.Error())
-		return nil, err
-	}
+func QueryBraveWeb(cc *Context, query string, vertical string, page int) (*brave.WebSearchResult, error) {
 	var res *brave.WebSearchResult
 	if vertical == "images" {
 		return nil, fmt.Errorf("images category not supported in web search")
-	} else {
-		res, err = client.WebSearch(cc.Request().Context(), query)
 	}
+	res, err := brave_client.WebSearch(cc.Request().Context(), query)
 
 	if err != nil {
 		cc.Err.Printf("Failed to query brave: %s\n", err.Error())

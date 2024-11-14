@@ -15,24 +15,25 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
 
-	"github.com/redis/go-redis/v9"
 	brave "dev.freespoke.com/brave-search"
+	"github.com/redis/go-redis/v9"
 )
 
 var (
-	HOTKEY        string
-	PUBLIC_KEY    string
-	PRIVATE_KEY   string
-	ENDON_URL     string
-	SEARX_URL     string
-	INSTANCE_UUID string
-	DSN           string
-	DEBUG         bool
-	TARGON_HUB_ENDPOINT string
+	HOTKEY                      string
+	PUBLIC_KEY                  string
+	PRIVATE_KEY                 string
+	BRAVE_KEY                   string
+	ENDON_URL                   string
+	INSTANCE_UUID               string
+	DSN                         string
+	DEBUG                       bool
+	TARGON_HUB_ENDPOINT         string
 	TARGON_HUB_ENDPOINT_API_KEY string
 
-	db     *sql.DB
-	client *redis.Client
+	db           *sql.DB
+	client       *redis.Client
+	brave_client brave.Brave
 )
 
 var Reset = "\033[0m"
@@ -57,8 +58,8 @@ func main() {
 	PUBLIC_KEY = safeEnv("PUBLIC_KEY")
 	PRIVATE_KEY = safeEnv("PRIVATE_KEY")
 	ENDON_URL = safeEnv("ENDON_URL")
+	BRAVE_KEY = safeEnv("BRAVE_API_KEY")
 	DSN = safeEnv("DSN")
-	SEARX_URL = "http://searxng:8080/"
 	TARGON_HUB_ENDPOINT = safeEnv("TARGON_HUB_ENDPOINT")
 	TARGON_HUB_ENDPOINT_API_KEY = safeEnv("TARGON_HUB_ENDPOINT_API_KEY")
 	INSTANCE_UUID = uuid.New().String()
@@ -102,6 +103,11 @@ func main() {
 	}
 	defer db.Close()
 	defer client.Close()
+
+	brave_client, err = brave.New(BRAVE_KEY)
+	if err != nil {
+		log.Fatalf("Failed to connect to brave: %v", err)
+	}
 
 	e.GET(("/ping"), func(c echo.Context) error {
 		return c.String(200, "")
@@ -163,16 +169,16 @@ func main() {
 
 		sendEvent(cc, map[string]interface{}{
 			"type":    "sources",
-			"sources": generalResults.Results,
+			"sources": generalResults.Web.Results,
 		})
 		sendEvent(cc, map[string]interface{}{
 			"type":      "related",
-			"followups": generalResults.Suggestions,
+			"followups": generalResults.InfoBox.Results,
 		})
 
 		var llmSources []string
-		if len(generalResults.Results) != 0 {
-			heroCard := generalResults.Results[0]
+		if len(generalResults.Web.Results) != 0 {
+			heroCard := generalResults.Web.Results[0]
 			llmSources = append(llmSources, fmt.Sprintf("Title: %s\nSnippet: %s\n", heroCard.Title, heroCard.Description))
 			sendEvent(cc, map[string]interface{}{
 				"type": "heroCard",
@@ -198,7 +204,7 @@ func main() {
 	e.GET("/search/autocomplete", func(c echo.Context) error {
 		client := &http.Client{}
 		query := c.QueryParam("q")
-		req, err := http.NewRequest(http.MethodGet, SEARX_URL+"/autocompleter", nil)
+		req, err := http.NewRequest(http.MethodGet, "/autocompleter", nil)
 		q := req.URL.Query()
 		q.Add("q", query)
 		req.URL.RawQuery = q.Encode()
@@ -213,7 +219,7 @@ func main() {
 		defer res.Body.Close()
 		if res.StatusCode != http.StatusOK {
 			log.Printf("Search Error: %x\n", res.StatusCode)
-			sendErrorToEndon(fmt.Errorf("searx returned status code: %d", res.StatusCode), "/search/autocomplete")
+			sendErrorToEndon(fmt.Errorf("brave returned status code: %d", res.StatusCode), "/search/autocomplete")
 			return c.String(500, "Search failed")
 		}
 		var resp []interface{}
@@ -241,7 +247,7 @@ func main() {
 			sendErrorToEndon(err, "/search/sources")
 			return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 		}
-		return c.JSON(200, search.Results)
+		return c.JSON(200, search.Web.Results)
 	})
 	e.Logger.Fatal(e.Start(":80"))
 }
