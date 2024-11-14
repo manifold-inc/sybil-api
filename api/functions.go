@@ -46,7 +46,6 @@ func QueryBraveWeb(cc *Context, query string, vertical string, page int) (*brave
 		return nil, err
 	}
 
-	fmt.Println(res)
 	return res, nil
 }
 

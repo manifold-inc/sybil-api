@@ -170,11 +170,13 @@ func main() {
 		for _, result := range generalResults.Web.Results {
 			urlSource := UrlSource{
 				URL:           result.URL,
-				Thumbnail:     result.Thumbnail.Original,
 				Title:         result.Title,
 				ParsedURL:     []string{result.URL},
 				Content:       result.Description,
 				PublishedDate: nil,
+			}
+			if result.Thumbnail != nil {
+				urlSource.Thumbnail = result.Thumbnail.Original
 			}
 			urlSources = append(urlSources, urlSource)
 		}
@@ -183,10 +185,17 @@ func main() {
 			"type":    "sources",
 			"sources": urlSources,
 		})
-		sendEvent(cc, map[string]interface{}{
-			"type":      "related",
-			"followups": generalResults.InfoBox.Results,
-		})
+		if generalResults.InfoBox != nil {
+			sendEvent(cc, map[string]interface{}{
+				"type":      "related",
+				"followups": generalResults.InfoBox.Results,
+			})
+		} else {
+			sendEvent(cc, map[string]interface{}{
+				"type":      "related",
+				"followups": []string{},
+			})
+		}
 
 		var llmSources []string
 		if len(generalResults.Web.Results) != 0 {
@@ -221,7 +230,7 @@ func main() {
 			sendErrorToEndon(err, "/search/autocomplete")
 			return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 		}
-		
+
 		q := req.URL.Query()
 		q.Add("q", query)
 		req.URL.RawQuery = q.Encode()
