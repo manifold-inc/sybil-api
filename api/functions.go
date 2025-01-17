@@ -35,6 +35,13 @@ func safeEnv(env string) string {
 	return res
 }
 
+func getEnv(env, fallback string) string {
+	if value, ok := os.LookupEnv(env); ok {
+		return value
+	}
+	return fallback
+}
+
 func querySearx(c *Context, query string, categories string, page int) (*SearxResponseBody, error) {
 	res, err := http.PostForm(SEARX_URL+"/search", url.Values{
 		"q":          {query},
