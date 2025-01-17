@@ -5,6 +5,8 @@ CHECK  := "\\xE2\\x9C\\x94"
 org := 'manifoldlabs'
 set shell := ["bash", "-uc"]
 
+set dotenv-required
+
 default:
   @just --list
 
@@ -37,3 +39,25 @@ push: (build)
   docker compose -f docker-compose.build.yml build
   docker compose -f docker-compose.build.yml push
 
+
+k8s-up: k8s-create k8s-build k8s-load k8s-deploy
+
+k8s-create:
+  kind create cluster --config ./k8s-deployment/local-kind-config.yaml
+
+k8s-build:
+  docker buildx build -t manifoldlabs/sybil-api:dev api --platform linux/amd64,linux/arm64
+
+k8s-load:
+  kind load docker-image manifoldlabs/sybil-api:dev
+
+k8s-deploy:
+  kubectl apply -f ./k8s-deployment/config-map.yaml
+  envsubst < ./k8s-deployment/deployments.yaml | kubectl apply -f -
+
+k8s-delete:
+  kubectl delete -f ./k8s-deployment/deployments.yaml
+  kubectl delete -f ./k8s-deployment/config-map.yaml
+
+k8s-down:
+  kind delete cluster
