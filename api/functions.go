@@ -57,7 +57,7 @@ func querySearx(c *Context, query string, categories string, page int) (*SearxRe
 	defer res.Body.Close()
 	if res.StatusCode != http.StatusOK {
 		c.Err.Printf("Search Error. Status code: %d\n", res.StatusCode)
-		return nil, errors.New("Search Failed")
+		return nil, errors.New("search failed")
 	}
 
 	var resp SearxResponseBody
@@ -84,7 +84,7 @@ func queryFallbacks(c *Context, sources []string, query string, model string) st
 		DisableKeepAlives: false,
 	}
 
-	httpClient := http.Client{Transport: tr, Timeout: 15 * time.Second}
+	httpClient := http.Client{Transport: tr, Timeout: 2 * time.Minute}
 
 	now := time.Now()
 	sources_string := ""
@@ -111,7 +111,7 @@ func queryFallbacks(c *Context, sources []string, query string, model string) st
 		Model:       model,
 	}
 
-	endpoint := "http://" + safeEnv("FALLBACK_SERVER_"+strings.ReplaceAll(model, "-", "_")) + "/v1/chat/completions"
+	endpoint := "http://" + safeEnv("FALLBACK_SERVER") + "/v1/chat/completions"
 	out, err := json.Marshal(body)
 	if err != nil {
 		c.Warn.Printf("Failed to parse json %s", err.Error())
@@ -119,7 +119,10 @@ func queryFallbacks(c *Context, sources []string, query string, model string) st
 	}
 
 	headers := map[string]string{
-		"Authorization": "Bearer " + safeEnv("FALLBACK_SERVER_API_KEY"),
+		"X-Targon-Model": model,
+		"Authorization":  fmt.Sprintf("Bearer %s", safeEnv("FALLBACK_SERVER_API_KEY")),
+		"Content-Type":   "application/json",
+		"Connection":     "keep-alive",
 	}
 
 	r, err := http.NewRequest("POST", endpoint, bytes.NewBuffer(out))
@@ -189,6 +192,7 @@ func queryFallbacks(c *Context, sources []string, query string, model string) st
 	return responseText
 }
 
+/*
 func queryTargon(c *Context, sources []string, query string) string {
 	tr := &http.Transport{
 		MaxIdleConns:      10,
@@ -204,7 +208,7 @@ func queryTargon(c *Context, sources []string, query string) string {
 		sources_string += sources[i] + "\n"
 	}
 	messages := []ChatMessage{{Role: "system", Content: fmt.Sprintf(`### Current Date: %s
-	### Instruction: 
+	### Instruction:
 	You are Sybil.com, an expert language model tasked with performing a search over the given query and search results.
 	You are running the text generation on Subnet 4, a bittensor subnet developed by Manifold Labs.
 	Your answer should be short, two paragraphs exactly, and should be relevant to the query.
@@ -300,6 +304,7 @@ func queryTargon(c *Context, sources []string, query string) string {
 	}
 	return responseText
 }
+*/
 
 func saveAnswer(query string, answer string, sources []string, session string) {
 	if DEBUG {
