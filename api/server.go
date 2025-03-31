@@ -19,15 +19,15 @@ import (
 )
 
 var (
-	HOTKEY        string
-	PUBLIC_KEY    string
-	PRIVATE_KEY   string
-	ENDON_URL     string
-	SEARX_URL     string
-	INSTANCE_UUID string
-	DSN           string
-	DEBUG         bool
-	TARGON_HUB_ENDPOINT string
+	HOTKEY                      string
+	PUBLIC_KEY                  string
+	PRIVATE_KEY                 string
+	ENDON_URL                   string
+	SEARX_URL                   string
+	INSTANCE_UUID               string
+	DSN                         string
+	DEBUG                       bool
+	TARGON_HUB_ENDPOINT         string
 	TARGON_HUB_ENDPOINT_API_KEY string
 
 	db     *sql.DB
@@ -131,6 +131,7 @@ func main() {
 		cc := c.(*Context)
 		type RequestBody struct {
 			Query string `json:"query"`
+			Model string `json:"model"`
 		}
 		cc.Request().Header.Add("Content-Type", "application/json")
 		var requestBody RequestBody
@@ -141,6 +142,7 @@ func main() {
 			return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 		}
 		query := requestBody.Query
+		model := requestBody.Model
 		if len(query) == 0 {
 			cc.Warn.Println("No query")
 			sendErrorToEndon(fmt.Errorf("no query"), "/search")
@@ -153,6 +155,7 @@ func main() {
 		cc.Response().Header().Set("X-Accel-Buffering", "no")
 
 		cc.Info.Printf("/search: %s\n", query)
+		cc.Info.Printf("Model: %s\n", model)
 
 		general, err := querySearx(cc, query, "general", 1)
 		if err != nil {
@@ -186,7 +189,8 @@ func main() {
 			})
 		}
 
-		answer := queryTargon(cc, llmSources, query)
+		//answer := queryTargon(cc, llmSources, query)
+		answer := queryFallbacks(cc, llmSources, query, model)
 		// We let this run in the background
 		go saveAnswer(query, answer, llmSources, c.Request().Header.Get("X-SESSION-ID"))
 
