@@ -187,7 +187,6 @@ func queryFallbacks(c *Context, sources []string, query string, model string) st
 		return ""
 	}
 	return responseText
-
 }
 
 func queryTargon(c *Context, sources []string, query string) string {
