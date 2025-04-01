@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"net/url"
@@ -49,7 +50,6 @@ func querySearx(c *Context, query string, categories string, page int) (*SearxRe
 		"pageno":     {fmt.Sprint(page)},
 		"categories": {categories},
 	})
-
 	if err != nil {
 		c.Err.Printf("Search Error: %s\n", err.Error())
 		return nil, err
@@ -59,9 +59,14 @@ func querySearx(c *Context, query string, categories string, page int) (*SearxRe
 		c.Err.Printf("Search Error. Status code: %d\n", res.StatusCode)
 		return nil, errors.New("search failed")
 	}
+	body, _ := io.ReadAll(res.Body)
 
 	var resp SearxResponseBody
-	json.NewDecoder(res.Body).Decode(&resp)
+	err = json.Unmarshal(body, &resp)
+	if err != nil {
+		c.Err.Printf("Failed decoding response form searx: %s", err.Error())
+		return nil, err
+	}
 	return &resp, nil
 }
 
@@ -118,10 +123,10 @@ func queryFallbacks(c *Context, sources []string, query string, model string) st
 	}
 
 	headers := map[string]string{
-		"X-Targon-Model":   model,
-		"Authorization":    fmt.Sprintf("Bearer %s", safeEnv("FALLBACK_SERVER_API_KEY")),
-		"Content-Type":     "application/json",
-		"Connection":		"keep-alive",
+		"X-Targon-Model": model,
+		"Authorization":  fmt.Sprintf("Bearer %s", safeEnv("FALLBACK_SERVER_API_KEY")),
+		"Content-Type":   "application/json",
+		"Connection":     "keep-alive",
 	}
 
 	r, err := http.NewRequest("POST", endpoint, bytes.NewBuffer(out))
