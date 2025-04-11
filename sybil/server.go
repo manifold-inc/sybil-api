@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -14,6 +15,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
+	"google.golang.org/api/customsearch/v1"
+	"google.golang.org/api/option"
 
 	"github.com/redis/go-redis/v9"
 )
@@ -23,15 +26,17 @@ var (
 	PUBLIC_KEY                  string
 	PRIVATE_KEY                 string
 	ENDON_URL                   string
-	SEARX_URL                   string
 	INSTANCE_UUID               string
 	DSN                         string
 	DEBUG                       bool
 	TARGON_HUB_ENDPOINT         string
 	TARGON_HUB_ENDPOINT_API_KEY string
+	GOOGLE_SEARCH_ENGINE_ID     string
+	GOOGLE_API_KEY              string
 
-	db     *sql.DB
-	client *redis.Client
+	db            *sql.DB
+	client        *redis.Client
+	googleService *customsearch.Service
 )
 
 var Reset = "\033[0m"
@@ -57,10 +62,11 @@ func main() {
 	PRIVATE_KEY = safeEnv("PRIVATE_KEY")
 	ENDON_URL = safeEnv("ENDON_URL")
 	DSN = safeEnv("DSN")
-	SEARX_URL = getEnv("SEARX_URL", "http://searxng:8080/")
 	TARGON_HUB_ENDPOINT = safeEnv("TARGON_HUB_ENDPOINT")
 	TARGON_HUB_ENDPOINT_API_KEY = safeEnv("TARGON_HUB_ENDPOINT_API_KEY")
 	INSTANCE_UUID = uuid.New().String()
+	GOOGLE_SEARCH_ENGINE_ID = safeEnv("GOOGLE_SEARCH_ENGINE_ID")
+	GOOGLE_API_KEY = safeEnv("GOOGLE_API_KEY")
 	debug, present := os.LookupEnv("DEBUG")
 	if !present {
 		DEBUG = false
@@ -99,6 +105,10 @@ func main() {
 	if err := db.Ping(); err != nil {
 		log.Fatalf("failed to ping: %v", err)
 	}
+	googleService, err = customsearch.NewService(context.Background(), option.WithAPIKey(GOOGLE_API_KEY))
+	if err != nil {
+		log.Fatalf("failed to create google service: %v", err)
+	}
 	defer db.Close()
 	defer client.Close()
 
@@ -119,7 +129,7 @@ func main() {
 			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 		}
 		cc.Info.Printf("/search/images: %s, page: %d\n", query, requestBody.Page)
-		search, err := querySearx(cc, query, "images", requestBody.Page)
+		search, err := queryGoogleSearch(cc, query, requestBody.Page, "image")
 		if err != nil {
 			sendErrorToEndon(err, "/search/images")
 			return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
@@ -157,7 +167,7 @@ func main() {
 		cc.Info.Printf("/search: %s\n", query)
 		cc.Info.Printf("Model: %s\n", model)
 
-		general, err := querySearx(cc, query, "general", 1)
+		general, err := queryGoogleSearch(cc, query, 1)
 		if err != nil {
 			sendErrorToEndon(err, "/search")
 			return c.String(500, "")
@@ -179,9 +189,14 @@ func main() {
 			sendEvent(cc, map[string]any{
 				"type": "heroCard",
 				"heroCard": map[string]any{
-					"type":  "news",
-					"url":   *herocard.Url,
-					"image": herocard.Thumbnail,
+					"type": "news",
+					"url":  *herocard.Url,
+					"image": func() interface{} {
+						if herocard.Thumbnail != nil && *herocard.Thumbnail != "" {
+							return *herocard.Thumbnail
+						}
+						return nil
+					}(),
 					"title": *herocard.Title,
 					"intro": *herocard.Content,
 					"size":  "auto",
@@ -199,30 +214,19 @@ func main() {
 	})
 
 	e.GET("/search/autocomplete", func(c echo.Context) error {
-		client := &http.Client{}
+		cc := c.(*Context)
 		query := c.QueryParam("q")
-		req, err := http.NewRequest(http.MethodGet, SEARX_URL+"/autocompleter", nil)
-		q := req.URL.Query()
-		q.Add("q", query)
-		req.URL.RawQuery = q.Encode()
+		if query == "" {
+			return c.JSON(200, []string{})
+		}
 
-		res, err := client.Do(req)
-
+		suggestions, err := queryGoogleAutocomplete(cc, query)
 		if err != nil {
-			log.Printf("Search Error: %s\n", err.Error())
 			sendErrorToEndon(err, "/search/autocomplete")
-			return c.String(500, "Search Failed")
+			return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 		}
-		defer res.Body.Close()
-		if res.StatusCode != http.StatusOK {
-			log.Printf("Search Error: %x\n", res.StatusCode)
-			sendErrorToEndon(fmt.Errorf("searx returned status code: %d", res.StatusCode), "/search/autocomplete")
-			return c.String(500, "Search failed")
-		}
-		var resp []interface{}
 
-		json.NewDecoder(res.Body).Decode(&resp)
-		return c.JSON(200, resp)
+		return c.JSON(200, suggestions)
 	})
 
 	e.POST("/search/sources", func(c echo.Context) error {
@@ -239,7 +243,7 @@ func main() {
 			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 		}
 		cc.Info.Printf("/search/sources: %s, page: %d\n", query, requestBody.Page)
-		search, err := querySearx(cc, query, "general", requestBody.Page)
+		search, err := queryGoogleSearch(cc, query, requestBody.Page)
 		if err != nil {
 			sendErrorToEndon(err, "/search/sources")
 			return echo.NewHTTPError(http.StatusInternalServerError, err.Error())

@@ -14,31 +14,7 @@ services:
     restart: always
     networks:
       - targon-hub-api_default
-    depends_on:
-      searxng:
-        condition: service_healthy
-
-  searxng:
-    image: docker.io/searxng/searxng:latest
-    healthcheck:
-      test: wget --no-verbose --tries=1 --spider http://0.0.0.0:8080 || exit 1
-      interval: 2s
-    restart: always
-    volumes:
-      - ./searxng:/etc/searxng:rw
-    environment:
-      - SEARXNG_BASE_URL=http://localhost:8080/
-    networks:
-      - targon-hub-api_default
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "1m"
-        max-file: "1"
 
 networks:
   targon-hub-api_default:
     external: true
-
-volumes:
-  searx-data:

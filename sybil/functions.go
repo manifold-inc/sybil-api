@@ -5,13 +5,12 @@ import (
 	"bytes"
 	"database/sql"
 	"encoding/json"
-	"errors"
 	"fmt"
-	"io"
 	"log"
 	"net/http"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -36,38 +35,213 @@ func safeEnv(env string) string {
 	return res
 }
 
-func getEnv(env, fallback string) string {
-	if value, ok := os.LookupEnv(env); ok {
-		return value
+// Helper function to safely extract string from map
+func getString(m map[string]interface{}, key string) string {
+	if val, ok := m[key].(string); ok {
+		return val
 	}
-	return fallback
+	return ""
 }
 
-func querySearx(c *Context, query string, categories string, page int) (*SearxResponseBody, error) {
-	res, err := http.PostForm(SEARX_URL+"/search", url.Values{
-		"q":          {query},
-		"format":     {"json"},
-		"pageno":     {fmt.Sprint(page)},
-		"categories": {categories},
-	})
+// Helper function to safely extract map from array
+func getFirstMap(arr []interface{}) map[string]interface{} {
+	if len(arr) > 0 {
+		if m, ok := arr[0].(map[string]interface{}); ok {
+			return m
+		}
+	}
+	return nil
+}
+
+// Helper function to extract image data from a map
+func extractImageData(m map[string]interface{}, srcKey string) (string, string) {
+	src := getString(m, srcKey)
+	width := getString(m, "width")
+	height := getString(m, "height")
+	if width != "" && height != "" {
+		return src, fmt.Sprintf("%sx%s", width, height)
+	}
+	return src, ""
+}
+
+func queryGoogleSearch(c *Context, query string, page int, searchType ...string) (*SearchResponseBody, error) {
+	search := googleService.Cse.List().Q(query).Cx(GOOGLE_SEARCH_ENGINE_ID)
+
+	if len(searchType) > 0 && searchType[0] == "image" {
+		search = search.SearchType("image")
+	}
+
+	if page > 1 {
+		search = search.Start(int64(page-1)*10 + 1)
+	}
+
+	res, err := search.Do()
 	if err != nil {
-		c.Err.Printf("Search Error: %s\n", err.Error())
+		c.Err.Printf("Google Search Error: %s", err.Error())
+		return nil, err
+	}
+
+	results := make([]SearchResults, len(res.Items))
+	for i, item := range res.Items {
+		title := item.Title
+		content := item.Snippet
+		link := item.Link
+		imgSource := link // Default to link if no specific image source found
+		source := ""
+		resolution := ""
+		metadata := ""
+		publishedDate := ""
+
+		// Handle pagemap for image source and metadata if available
+		if item.Pagemap != nil {
+			var pagemap map[string]interface{}
+			if err := json.Unmarshal(item.Pagemap, &pagemap); err != nil {
+				c.Err.Printf("Failed to unmarshal pagemap: %s", err.Error())
+				continue
+			}
+
+			// Handle image search results
+			if len(searchType) > 0 && searchType[0] == "image" {
+				// Try cse_image first
+				if cseImages, ok := pagemap["cse_image"].([]interface{}); ok {
+					if cseImage := getFirstMap(cseImages); cseImage != nil {
+						src, res := extractImageData(cseImage, "src")
+						if src != "" {
+							imgSource = src
+						}
+						if res != "" {
+							resolution = res
+						}
+					}
+				}
+
+				// Try imageobject for additional metadata
+				if imageObjects, ok := pagemap["imageobject"].([]interface{}); ok {
+					if imageObject := getFirstMap(imageObjects); imageObject != nil {
+						src, res := extractImageData(imageObject, "url")
+						if src != "" {
+							imgSource = src
+						}
+						if res != "" {
+							resolution = res
+						}
+						if content := getString(imageObject, "content"); content != "" {
+							metadata = content
+						}
+					}
+				}
+			}
+
+			// Handle metadata from metatags
+			if metatags, ok := pagemap["metatags"].([]interface{}); ok {
+				if metatag := getFirstMap(metatags); metatag != nil {
+					publishedDate = getString(metatag, "article:published_time")
+					if desc := getString(metatag, "og:description"); desc != "" {
+						metadata = desc
+					}
+				}
+			}
+		}
+
+		// Get source and parsed URL from link
+		if link != "" {
+			if parsed, err := url.Parse(link); err == nil {
+				source = parsed.Hostname()
+				parsedUrl := strings.Split(source, ".")
+				results[i] = SearchResults{
+					Title:         &title,
+					Content:       &content,
+					Url:           &link,
+					ImgSource:     &imgSource,
+					ParsedUrl:     &parsedUrl,
+					Source:        &source,
+					Resolution:    &resolution,
+					Metadata:      &metadata,
+					PublishedDate: &publishedDate,
+				}
+				continue
+			}
+		}
+
+		// Fallback for when URL parsing fails
+		emptyParsedUrl := []string{}
+		results[i] = SearchResults{
+			Title:         &title,
+			Content:       &content,
+			Url:           &link,
+			ImgSource:     &imgSource,
+			ParsedUrl:     &emptyParsedUrl,
+			Source:        &source,
+			Resolution:    &resolution,
+			Metadata:      &metadata,
+			PublishedDate: &publishedDate,
+		}
+	}
+
+	// Create and return SearchResponseBody
+	totalResults, err := strconv.Atoi(res.SearchInformation.TotalResults)
+	if err != nil {
+		c.Err.Printf("Error converting total results to int: %s", err.Error())
+		totalResults = 0
+	}
+
+	// Get related queries
+	suggestions := []string{}
+	relatedSearch := googleService.Cse.List().Q("related:" + query).Cx(GOOGLE_SEARCH_ENGINE_ID)
+	relatedRes, err := relatedSearch.Do()
+	if err == nil && relatedRes.Items != nil {
+		for _, item := range relatedRes.Items {
+			if item.Title != "" {
+				suggestions = append(suggestions, item.Title)
+			}
+		}
+	}
+
+	return &SearchResponseBody{
+		Query:             query,
+		Number_of_results: totalResults,
+		Results:           results,
+		Suggestions:       suggestions,
+	}, nil
+}
+
+func queryGoogleAutocomplete(c *Context, query string) ([]interface{}, error) {
+	// Google's autocomplete endpoint
+	url := fmt.Sprintf("https://suggestqueries.google.com/complete/search?client=firefox&q=%s", url.QueryEscape(query))
+
+	req, err := http.NewRequest(http.MethodGet, url, nil)
+	if err != nil {
+		c.Err.Printf("Failed to create autocomplete request: %s", err.Error())
+		return nil, err
+	}
+
+	client := &http.Client{Timeout: 5 * time.Second}
+	res, err := client.Do(req)
+	if err != nil {
+		c.Err.Printf("Autocomplete Error: %s", err.Error())
 		return nil, err
 	}
 	defer res.Body.Close()
-	if res.StatusCode != http.StatusOK {
-		c.Err.Printf("Search Error. Status code: %d\n", res.StatusCode)
-		return nil, errors.New("search failed")
-	}
-	body, _ := io.ReadAll(res.Body)
 
-	var resp SearxResponseBody
-	err = json.Unmarshal(body, &resp)
-	if err != nil {
-		c.Err.Printf("Failed decoding response form searx: %s", err.Error())
+	if res.StatusCode != http.StatusOK {
+		c.Err.Printf("Autocomplete Error. Status code: %d", res.StatusCode)
+		return nil, fmt.Errorf("autocomplete failed with status: %d", res.StatusCode)
+	}
+
+	// Google's response is in JSON format: [query, [suggestions], [], metadata]
+	var response []interface{}
+	if err := json.NewDecoder(res.Body).Decode(&response); err != nil {
+		c.Err.Printf("Failed to decode autocomplete response: %s", err.Error())
 		return nil, err
 	}
-	return &resp, nil
+
+	// Return only the first two elements: [query, [suggestions]]
+	if len(response) >= 2 {
+		return []interface{}{response[0], response[1]}, nil
+	}
+
+	// If response is malformed, return empty query and suggestions
+	return []interface{}{"", []string{}}, nil
 }
 
 func sendEvent(c *Context, data map[string]any) {
@@ -190,7 +364,7 @@ func queryFallbacks(c *Context, sources []string, query string, model string) st
 			responseText += content
 		}
 	}
-	if finished == false {
+	if !finished {
 		return ""
 	}
 	return responseText
@@ -320,9 +494,7 @@ func saveAnswer(query string, answer string, sources []string, session string) {
 		return
 	}
 	publicId = "sh_" + publicId
-	var nonNullUserId int
-	userId := &nonNullUserId
-	userId = nil
+	var userId *int
 	if len(session) > 0 {
 		err := db.QueryRow(`
 			SELECT user.iid 
