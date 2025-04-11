@@ -42,30 +42,6 @@ func getEnv(env, fallback string) string {
 	return fallback
 }
 
-/*func querySearx(c *Context, query string, categories string, page int) (*SearxResponseBody, error) {
-	res, err := http.PostForm(SEARX_URL+"/search", url.Values{
-		"q":          {query},
-		"format":     {"json"},
-		"pageno":     {fmt.Sprint(page)},
-		"categories": {categories},
-	})
-
-	if err != nil {
-		c.Err.Printf("Search Error: %s\n", err.Error())
-		return nil, err
-	}
-	defer res.Body.Close()
-	if res.StatusCode != http.StatusOK {
-		c.Err.Printf("Search Error. Status code: %d\n", res.StatusCode)
-		return nil, errors.New("search failed")
-	}
-
-	var resp SearxResponseBody
-	json.NewDecoder(res.Body).Decode(&resp)
-	return &resp, nil
-}
-*/
-
 func queryGoogleSearch(c *Context, query string, page int, searchType ...string) (*SearchResponseBody, error) {
 	search := googleService.Cse.List().Q(query).Cx(GOOGLE_SEARCH_ENGINE_ID)
 

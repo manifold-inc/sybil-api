@@ -26,7 +26,6 @@ var (
 	PUBLIC_KEY                  string
 	PRIVATE_KEY                 string
 	ENDON_URL                   string
-	SEARX_URL                   string
 	INSTANCE_UUID               string
 	DSN                         string
 	DEBUG                       bool
@@ -63,7 +62,6 @@ func main() {
 	PRIVATE_KEY = safeEnv("PRIVATE_KEY")
 	ENDON_URL = safeEnv("ENDON_URL")
 	DSN = safeEnv("DSN")
-	SEARX_URL = getEnv("SEARX_URL", "http://searxng:8080/")
 	TARGON_HUB_ENDPOINT = safeEnv("TARGON_HUB_ENDPOINT")
 	TARGON_HUB_ENDPOINT_API_KEY = safeEnv("TARGON_HUB_ENDPOINT_API_KEY")
 	INSTANCE_UUID = uuid.New().String()
