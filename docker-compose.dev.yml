@@ -6,7 +6,7 @@ services:
       interval: "1s"
     env_file: .env
     build:
-      context: ./api
+      context: ./sybil
       platforms: 
       - linux/arm64
     environment:
