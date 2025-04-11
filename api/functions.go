@@ -35,13 +35,6 @@ func safeEnv(env string) string {
 	return res
 }
 
-func getEnv(env, fallback string) string {
-	if value, ok := os.LookupEnv(env); ok {
-		return value
-	}
-	return fallback
-}
-
 func queryGoogleSearch(c *Context, query string, page int, searchType ...string) (*SearchResponseBody, error) {
 	search := googleService.Cse.List().Q(query).Cx(GOOGLE_SEARCH_ENGINE_ID)
 
@@ -371,7 +364,7 @@ func queryFallbacks(c *Context, sources []string, query string, model string) st
 			responseText += content
 		}
 	}
-	if finished == false {
+	if !finished {
 		return ""
 	}
 	return responseText
@@ -501,9 +494,7 @@ func saveAnswer(query string, answer string, sources []string, session string) {
 		return
 	}
 	publicId = "sh_" + publicId
-	var nonNullUserId int
-	userId := &nonNullUserId
-	userId = nil
+	var userId *int
 	if len(session) > 0 {
 		err := db.QueryRow(`
 			SELECT user.iid 
