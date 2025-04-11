@@ -189,9 +189,14 @@ func main() {
 			sendEvent(cc, map[string]any{
 				"type": "heroCard",
 				"heroCard": map[string]any{
-					"type":  "news",
-					"url":   *herocard.Url,
-					"image": herocard.Thumbnail,
+					"type": "news",
+					"url":  *herocard.Url,
+					"image": func() interface{} {
+						if herocard.Thumbnail != nil && *herocard.Thumbnail != "" {
+							return *herocard.Thumbnail
+						}
+						return nil
+					}(),
 					"title": *herocard.Title,
 					"intro": *herocard.Content,
 					"size":  "auto",

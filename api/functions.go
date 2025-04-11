@@ -63,7 +63,7 @@ func queryGoogleSearch(c *Context, query string, page int, searchType ...string)
 	for i, item := range res.Items {
 		title := item.Title
 		content := item.Snippet
-		url := item.Link
+		link := item.Link
 		thumbnail := ""
 
 		// Handle pagemap for thumbnail if available
@@ -78,12 +78,24 @@ func queryGoogleSearch(c *Context, query string, page int, searchType ...string)
 			}
 		}
 
+		// Parse URL for parsed_url field
+		var parsedUrl []string
+		if link != "" {
+			if parsed, err := url.Parse(link); err == nil {
+				hostname := parsed.Hostname()
+				if hostname != "" {
+					parsedUrl = strings.Split(hostname, ".")
+				}
+			}
+		}
+
 		// Map Google search result to our SearchResults struct
 		results[i] = SearchResults{
 			Title:     &title,
 			Content:   &content,
-			Url:       &url,
+			Url:       &link,
 			Thumbnail: &thumbnail,
+			ParsedUrl: &parsedUrl,
 		}
 	}
 
