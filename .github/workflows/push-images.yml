@@ -6,7 +6,7 @@ on:
     branches:
       - "main"
     paths:
-      - "api/**"
+      - "sybil/**"
 
 jobs:
   docker:
@@ -30,10 +30,10 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Build and push targon hub miner cache
+      - name: Build and push sybil api
         uses: docker/build-push-action@v6
         with:
-          context: api
+          context: sybil
           push: true
           tags: |
             manifoldlabs/sybil-api:latest
