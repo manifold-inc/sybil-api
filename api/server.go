@@ -131,7 +131,7 @@ func main() {
 			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 		}
 		cc.Info.Printf("/search/images: %s, page: %d\n", query, requestBody.Page)
-		search, err := querySearx(cc, query, "images", requestBody.Page)
+		search, err := queryGoogleSearch(cc, query, requestBody.Page, "image")
 		if err != nil {
 			sendErrorToEndon(err, "/search/images")
 			return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
@@ -169,7 +169,7 @@ func main() {
 		cc.Info.Printf("/search: %s\n", query)
 		cc.Info.Printf("Model: %s\n", model)
 
-		general, err := querySearx(cc, query, "general", 1)
+		general, err := queryGoogleSearch(cc, query, 1, "web")
 		if err != nil {
 			sendErrorToEndon(err, "/search")
 			return c.String(500, "")
@@ -211,30 +211,19 @@ func main() {
 	})
 
 	e.GET("/search/autocomplete", func(c echo.Context) error {
-		client := &http.Client{}
+		cc := c.(*Context)
 		query := c.QueryParam("q")
-		req, err := http.NewRequest(http.MethodGet, SEARX_URL+"/autocompleter", nil)
-		q := req.URL.Query()
-		q.Add("q", query)
-		req.URL.RawQuery = q.Encode()
+		if query == "" {
+			return c.JSON(200, []string{})
+		}
 
-		res, err := client.Do(req)
-
+		suggestions, err := queryGoogleAutocomplete(cc, query)
 		if err != nil {
-			log.Printf("Search Error: %s\n", err.Error())
 			sendErrorToEndon(err, "/search/autocomplete")
-			return c.String(500, "Search Failed")
+			return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 		}
-		defer res.Body.Close()
-		if res.StatusCode != http.StatusOK {
-			log.Printf("Search Error: %x\n", res.StatusCode)
-			sendErrorToEndon(fmt.Errorf("searx returned status code: %d", res.StatusCode), "/search/autocomplete")
-			return c.String(500, "Search failed")
-		}
-		var resp []interface{}
 
-		json.NewDecoder(res.Body).Decode(&resp)
-		return c.JSON(200, resp)
+		return c.JSON(200, suggestions)
 	})
 
 	e.POST("/search/sources", func(c echo.Context) error {
@@ -251,7 +240,7 @@ func main() {
 			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 		}
 		cc.Info.Printf("/search/sources: %s, page: %d\n", query, requestBody.Page)
-		search, err := querySearx(cc, query, "general", requestBody.Page)
+		search, err := queryGoogleSearch(cc, query, requestBody.Page, "web")
 		if err != nil {
 			sendErrorToEndon(err, "/search/sources")
 			return echo.NewHTTPError(http.StatusInternalServerError, err.Error())

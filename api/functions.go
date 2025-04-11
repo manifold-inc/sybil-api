@@ -5,12 +5,12 @@ import (
 	"bytes"
 	"database/sql"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"log"
 	"net/http"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -42,7 +42,7 @@ func getEnv(env, fallback string) string {
 	return fallback
 }
 
-func querySearx(c *Context, query string, categories string, page int) (*SearxResponseBody, error) {
+/*func querySearx(c *Context, query string, categories string, page int) (*SearxResponseBody, error) {
 	res, err := http.PostForm(SEARX_URL+"/search", url.Values{
 		"q":          {query},
 		"format":     {"json"},
@@ -63,6 +63,121 @@ func querySearx(c *Context, query string, categories string, page int) (*SearxRe
 	var resp SearxResponseBody
 	json.NewDecoder(res.Body).Decode(&resp)
 	return &resp, nil
+}
+*/
+
+func queryGoogleSearch(c *Context, query string, page int, searchType string) (*SearchResponseBody, error) {
+	search := googleService.Cse.List().Q(query).Cx(GOOGLE_SEARCH_ENGINE_ID).SearchType(searchType)
+
+	if page > 1 {
+		search = search.Start(int64(page-1)*10 + 1)
+	}
+
+	res, err := search.Do()
+	if err != nil {
+		c.Err.Printf("Google Search Error: %s", err.Error())
+		return nil, err
+	}
+
+	results := make([]SearchResults, len(res.Items))
+	for i, item := range res.Items {
+		title := item.Title
+		content := item.Snippet
+		url := item.Link
+		thumbnail := ""
+
+		// Handle pagemap for thumbnail if available
+		if item.Pagemap != nil {
+			var pagemap map[string][]struct {
+				Src string `json:"src"`
+			}
+			if err := json.Unmarshal(item.Pagemap, &pagemap); err == nil {
+				if thumbnails, ok := pagemap["cse_thumbnail"]; ok && len(thumbnails) > 0 {
+					thumbnail = thumbnails[0].Src
+				}
+			}
+		}
+
+		// Map Google search result to our SearchResults struct
+		results[i] = SearchResults{
+			Title:     &title,
+			Content:   &content,
+			Url:       &url,
+			Thumbnail: &thumbnail,
+		}
+	}
+
+	// Create and return SearchResponseBody
+	totalResults, err := strconv.Atoi(res.SearchInformation.TotalResults)
+	if err != nil {
+		c.Err.Printf("Error converting total results to int: %s", err.Error())
+		totalResults = 0
+	}
+
+	// Get related queries
+	suggestions := []string{}
+	relatedSearch := googleService.Cse.List().Q("related:" + query).Cx(GOOGLE_SEARCH_ENGINE_ID)
+	relatedRes, err := relatedSearch.Do()
+	if err == nil && relatedRes.Items != nil {
+		for _, item := range relatedRes.Items {
+			if item.Title != "" {
+				suggestions = append(suggestions, item.Title)
+			}
+		}
+	}
+
+	return &SearchResponseBody{
+		Query:             query,
+		Number_of_results: totalResults,
+		Results:           results,
+		Suggestions:       suggestions,
+	}, nil
+}
+
+func queryGoogleAutocomplete(c *Context, query string) ([]string, error) {
+	// Google's autocomplete endpoint
+	url := fmt.Sprintf("https://suggestqueries.google.com/complete/search?client=firefox&q=%s", url.QueryEscape(query))
+
+	req, err := http.NewRequest(http.MethodGet, url, nil)
+	if err != nil {
+		c.Err.Printf("Failed to create autocomplete request: %s", err.Error())
+		return nil, err
+	}
+
+	client := &http.Client{Timeout: 5 * time.Second}
+	res, err := client.Do(req)
+	if err != nil {
+		c.Err.Printf("Autocomplete Error: %s", err.Error())
+		return nil, err
+	}
+	defer res.Body.Close()
+
+	if res.StatusCode != http.StatusOK {
+		c.Err.Printf("Autocomplete Error. Status code: %d", res.StatusCode)
+		return nil, fmt.Errorf("autocomplete failed with status: %d", res.StatusCode)
+	}
+
+	// Google's response is in JSON format: [query, [suggestions], ...]
+	var response []interface{}
+	if err := json.NewDecoder(res.Body).Decode(&response); err != nil {
+		c.Err.Printf("Failed to decode autocomplete response: %s", err.Error())
+		return nil, err
+	}
+
+	// Extract suggestions from the response
+	if len(response) >= 2 {
+		if suggestions, ok := response[1].([]interface{}); ok {
+			result := make([]string, len(suggestions))
+			for i, s := range suggestions {
+				if str, ok := s.(string); ok {
+					result[i] = str
+				}
+			}
+			return result, nil
+		}
+	}
+
+	return []string{}, nil
 }
 
 func sendEvent(c *Context, data map[string]any) {

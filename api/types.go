@@ -29,7 +29,7 @@ type InferenceBody struct {
 	Logprobs    bool          `json:"logprobs"`
 }
 
-type SearxResults struct {
+type SearchResults struct {
 	Url           *string   `json:"url,omitempty"`
 	Source        *string   `json:"source,omitempty"`
 	Resolution    *string   `json:"resolution,omitempty"`
@@ -42,11 +42,11 @@ type SearxResults struct {
 	PublishedDate *string   `json:"publishedDate,omitempty"`
 }
 
-type SearxResponseBody struct {
-	Query             string         `json:"query"`
-	Number_of_results int            `json:"number_of_results"`
-	Results           []SearxResults `json:"results,omitempty"`
-	Suggestions       []string       `json:"suggestions,omitempty"`
+type SearchResponseBody struct {
+	Query             string          `json:"query"`
+	Number_of_results int             `json:"number_of_results"`
+	Results           []SearchResults `json:"results,omitempty"`
+	Suggestions       []string        `json:"suggestions,omitempty"`
 }
 
 type Event struct {
