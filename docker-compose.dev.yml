@@ -1,5 +1,5 @@
 services:
-  api:
+  sybil:
     image: manifoldlabs/sybil-api:latest
     healthcheck: 
       test: ["CMD", "curl", "-f", "-X", "GET", "http://localhost/ping"]
