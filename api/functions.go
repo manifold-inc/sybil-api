@@ -66,8 +66,12 @@ func getEnv(env, fallback string) string {
 }
 */
 
-func queryGoogleSearch(c *Context, query string, page int, searchType string) (*SearchResponseBody, error) {
-	search := googleService.Cse.List().Q(query).Cx(GOOGLE_SEARCH_ENGINE_ID).SearchType(searchType)
+func queryGoogleSearch(c *Context, query string, page int, searchType ...string) (*SearchResponseBody, error) {
+	search := googleService.Cse.List().Q(query).Cx(GOOGLE_SEARCH_ENGINE_ID)
+
+	if len(searchType) > 0 && searchType[0] == "image" {
+		search = search.SearchType("image")
+	}
 
 	if page > 1 {
 		search = search.Start(int64(page-1)*10 + 1)

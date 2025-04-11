@@ -169,7 +169,7 @@ func main() {
 		cc.Info.Printf("/search: %s\n", query)
 		cc.Info.Printf("Model: %s\n", model)
 
-		general, err := queryGoogleSearch(cc, query, 1, "web")
+		general, err := queryGoogleSearch(cc, query, 1)
 		if err != nil {
 			sendErrorToEndon(err, "/search")
 			return c.String(500, "")
@@ -240,7 +240,7 @@ func main() {
 			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 		}
 		cc.Info.Printf("/search/sources: %s, page: %d\n", query, requestBody.Page)
-		search, err := queryGoogleSearch(cc, query, requestBody.Page, "web")
+		search, err := queryGoogleSearch(cc, query, requestBody.Page)
 		if err != nil {
 			sendErrorToEndon(err, "/search/sources")
 			return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
