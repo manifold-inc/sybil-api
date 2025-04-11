@@ -35,6 +35,35 @@ func safeEnv(env string) string {
 	return res
 }
 
+// Helper function to safely extract string from map
+func getString(m map[string]interface{}, key string) string {
+	if val, ok := m[key].(string); ok {
+		return val
+	}
+	return ""
+}
+
+// Helper function to safely extract map from array
+func getFirstMap(arr []interface{}) map[string]interface{} {
+	if len(arr) > 0 {
+		if m, ok := arr[0].(map[string]interface{}); ok {
+			return m
+		}
+	}
+	return nil
+}
+
+// Helper function to extract image data from a map
+func extractImageData(m map[string]interface{}, srcKey string) (string, string) {
+	src := getString(m, srcKey)
+	width := getString(m, "width")
+	height := getString(m, "height")
+	if width != "" && height != "" {
+		return src, fmt.Sprintf("%sx%s", width, height)
+	}
+	return src, ""
+}
+
 func queryGoogleSearch(c *Context, query string, page int, searchType ...string) (*SearchResponseBody, error) {
 	search := googleService.Cse.List().Q(query).Cx(GOOGLE_SEARCH_ENGINE_ID)
 
@@ -69,35 +98,6 @@ func queryGoogleSearch(c *Context, query string, page int, searchType ...string)
 			if err := json.Unmarshal(item.Pagemap, &pagemap); err != nil {
 				c.Err.Printf("Failed to unmarshal pagemap: %s", err.Error())
 				continue
-			}
-
-			// Helper function to safely extract string from map
-			getString := func(m map[string]interface{}, key string) string {
-				if val, ok := m[key].(string); ok {
-					return val
-				}
-				return ""
-			}
-
-			// Helper function to safely extract map from array
-			getFirstMap := func(arr []interface{}) map[string]interface{} {
-				if len(arr) > 0 {
-					if m, ok := arr[0].(map[string]interface{}); ok {
-						return m
-					}
-				}
-				return nil
-			}
-
-			// Helper function to extract image data from a map
-			extractImageData := func(m map[string]interface{}, srcKey string) (string, string) {
-				src := getString(m, srcKey)
-				width := getString(m, "width")
-				height := getString(m, "height")
-				if width != "" && height != "" {
-					return src, fmt.Sprintf("%sx%s", width, height)
-				}
-				return src, ""
 			}
 
 			// Handle image search results
