@@ -12,9 +12,9 @@ services:
       - traefik.http.services.sybil.loadbalancer.server.port=80
     env_file: .env
     restart: always
-    #networks:
-    #  - targon-hub-api_default
+    networks:
+      - targon-hub-api_default
 
-#networks:
-#  targon-hub-api_default:
-#    external: true
+networks:
+  targon-hub-api_default:
+    external: true
