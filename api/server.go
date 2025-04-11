@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -14,6 +15,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
+	"google.golang.org/api/customsearch/v1"
+	"google.golang.org/api/option"
 
 	"github.com/redis/go-redis/v9"
 )
@@ -29,9 +32,12 @@ var (
 	DEBUG                       bool
 	TARGON_HUB_ENDPOINT         string
 	TARGON_HUB_ENDPOINT_API_KEY string
+	GOOGLE_SEARCH_ENGINE_ID     string
+	GOOGLE_API_KEY              string
 
-	db     *sql.DB
-	client *redis.Client
+	db            *sql.DB
+	client        *redis.Client
+	googleService *customsearch.Service
 )
 
 var Reset = "\033[0m"
@@ -61,6 +67,8 @@ func main() {
 	TARGON_HUB_ENDPOINT = safeEnv("TARGON_HUB_ENDPOINT")
 	TARGON_HUB_ENDPOINT_API_KEY = safeEnv("TARGON_HUB_ENDPOINT_API_KEY")
 	INSTANCE_UUID = uuid.New().String()
+	GOOGLE_SEARCH_ENGINE_ID = safeEnv("GOOGLE_SEARCH_ENGINE_ID")
+	GOOGLE_API_KEY = safeEnv("GOOGLE_API_KEY")
 	debug, present := os.LookupEnv("DEBUG")
 	if !present {
 		DEBUG = false
@@ -98,6 +106,10 @@ func main() {
 	}
 	if err := db.Ping(); err != nil {
 		log.Fatalf("failed to ping: %v", err)
+	}
+	googleService, err = customsearch.NewService(context.Background(), option.WithAPIKey(GOOGLE_API_KEY))
+	if err != nil {
+		log.Fatalf("failed to create google service: %v", err)
 	}
 	defer db.Close()
 	defer client.Close()

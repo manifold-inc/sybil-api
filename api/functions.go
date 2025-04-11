@@ -118,10 +118,10 @@ func queryFallbacks(c *Context, sources []string, query string, model string) st
 	}
 
 	headers := map[string]string{
-		"X-Targon-Model":   model,
-		"Authorization":    fmt.Sprintf("Bearer %s", safeEnv("FALLBACK_SERVER_API_KEY")),
-		"Content-Type":     "application/json",
-		"Connection":		"keep-alive",
+		"X-Targon-Model": model,
+		"Authorization":  fmt.Sprintf("Bearer %s", safeEnv("FALLBACK_SERVER_API_KEY")),
+		"Content-Type":   "application/json",
+		"Connection":     "keep-alive",
 	}
 
 	r, err := http.NewRequest("POST", endpoint, bytes.NewBuffer(out))
