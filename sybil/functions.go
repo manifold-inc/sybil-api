@@ -256,7 +256,7 @@ func sendEvent(c *Context, data map[string]any) {
 	c.Response().Flush()
 }
 
-func queryFallbacks(c *Context, sources []string, query string, model string) string {
+func queryTargon(c *Context, sources []string, query string, model string) string {
 	tr := &http.Transport{
 		MaxIdleConns:      10,
 		IdleConnTimeout:   30 * time.Second,
@@ -270,123 +270,8 @@ func queryFallbacks(c *Context, sources []string, query string, model string) st
 	for i := range sources {
 		sources_string += sources[i] + "\n"
 	}
-
 	messages := []ChatMessage{{Role: "system", Content: fmt.Sprintf(`### Current Date: %s
 	### Instruction: 
-	You are Sybil.com, an expert language model tasked with performing a search over the given query and search results.
-	You are running the text generation on Subnet 4, a bittensor subnet developed by Manifold Labs.
-	Your answer should be short, two paragraphs exactly, and should be relevant to the query.
-
-	### Sources:
-	%s
-	`, now.Format("Mon Jan2 15:04:05 MST 2006"), sources_string)}, {Role: "user", Content: query}}
-
-	body := InferenceBody{
-		Messages:    messages,
-		MaxTokens:   3012,
-		Temperature: .3,
-		Stream:      true,
-		Model:       model,
-	}
-
-	endpoint := "http://" + safeEnv("FALLBACK_SERVER") + "/v1/chat/completions"
-	out, err := json.Marshal(body)
-	if err != nil {
-		c.Warn.Printf("Failed to parse json %s", err.Error())
-		return ""
-	}
-
-	headers := map[string]string{
-		"X-Targon-Model": model,
-		"Authorization":  fmt.Sprintf("Bearer %s", safeEnv("FALLBACK_SERVER_API_KEY")),
-		"Content-Type":   "application/json",
-		"Connection":     "keep-alive",
-	}
-
-	r, err := http.NewRequest("POST", endpoint, bytes.NewBuffer(out))
-	if err != nil {
-		c.Warn.Printf("Failed fallback request: %s", err.Error())
-		return ""
-	}
-
-	for key, value := range headers {
-		r.Header.Set(key, value)
-	}
-	r.Close = true
-
-	res, err := httpClient.Do(r)
-	if err != nil {
-		c.Warn.Printf("Failed fallback request\nError: %s\n", err.Error())
-		return ""
-	}
-	defer res.Body.Close()
-	if res.StatusCode != http.StatusOK {
-		c.Warn.Printf("Failed fallback request\nError: %d\n", res.StatusCode)
-		return ""
-	}
-
-	reader := bufio.NewScanner(res.Body)
-	finished := false
-	tokens := 0
-	responseText := ""
-	var response Response
-	for reader.Scan() {
-		select {
-		case <-c.Request().Context().Done():
-			return ""
-		default:
-			token := reader.Text()
-			if token == "data: [DONE]" {
-				finished = true
-				sendEvent(c, map[string]any{
-					"type":     "answer",
-					"text":     "",
-					"finished": finished,
-				})
-				return responseText
-			}
-			token, found := strings.CutPrefix(token, "data: ")
-			if !found {
-				continue
-			}
-			tokens += 1
-			err := json.Unmarshal([]byte(token), &response)
-			if err != nil {
-				c.Err.Printf("Failed decoding token string: %s", err)
-				continue
-			}
-			content := response.Choices[0].Delta.Content
-			sendEvent(c, map[string]any{
-				"type":     "answer",
-				"text":     content,
-				"finished": finished,
-			})
-			responseText += content
-		}
-	}
-	if !finished {
-		return ""
-	}
-	return responseText
-}
-
-/*
-func queryTargon(c *Context, sources []string, query string) string {
-	tr := &http.Transport{
-		MaxIdleConns:      10,
-		IdleConnTimeout:   30 * time.Second,
-		DisableKeepAlives: false,
-	}
-
-	httpClient := http.Client{Transport: tr, Timeout: 15 * time.Second}
-
-	now := time.Now()
-	sources_string := ""
-	for i := range sources {
-		sources_string += sources[i] + "\n"
-	}
-	messages := []ChatMessage{{Role: "system", Content: fmt.Sprintf(`### Current Date: %s
-	### Instruction:
 	You are Sybil.com, an expert language model tasked with performing a search over the given query and search results.
 	You are running the text generation on Subnet 4, a bittensor subnet developed by Manifold Labs.
 	Your answer should be short, two paragraphs exactly, and should be relevant to the query.
@@ -400,8 +285,7 @@ func queryTargon(c *Context, sources []string, query string) string {
 		MaxTokens:   3012,
 		Temperature: .3,
 		Stream:      true,
-		Logprobs:    true,
-		Model:       "nvidia/Llama-3.1-Nemotron-70B-Instruct-HF",
+		Model:       model,
 	}
 
 	endpoint := TARGON_HUB_ENDPOINT + "/chat/completions"
@@ -412,7 +296,10 @@ func queryTargon(c *Context, sources []string, query string) string {
 	}
 
 	headers := map[string]string{
-		"Authorization": "Bearer " + TARGON_HUB_ENDPOINT_API_KEY,
+		"Authorization":  "Bearer " + TARGON_HUB_ENDPOINT_API_KEY,
+		"Content-Type":   "application/json",
+		"Connection":     "keep-alive",
+		"X-Targon-Model": model,
 	}
 
 	r, err := http.NewRequest("POST", endpoint, bytes.NewBuffer(out))
@@ -482,7 +369,6 @@ func queryTargon(c *Context, sources []string, query string) string {
 	}
 	return responseText
 }
-*/
 
 func saveAnswer(query string, answer string, sources []string, session string) {
 	if DEBUG {

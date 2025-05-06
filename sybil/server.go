@@ -204,8 +204,7 @@ func main() {
 			})
 		}
 
-		//answer := queryTargon(cc, llmSources, query)
-		answer := queryFallbacks(cc, llmSources, query, model)
+		answer := queryTargon(cc, llmSources, query, model)
 		// We let this run in the background
 		go saveAnswer(query, answer, llmSources, c.Request().Header.Get("X-SESSION-ID"))
 
