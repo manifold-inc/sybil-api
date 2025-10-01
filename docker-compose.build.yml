@@ -1,8 +1,0 @@
-services:
-  sybil:
-    image: manifoldlabs/sybil-api:latest
-    build:
-      platforms: 
-      - linux/amd64
-      - linux/arm64
-      context: ./sybil

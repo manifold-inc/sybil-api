@@ -11,11 +11,10 @@ RUN go mod download
 
 COPY . .
 
-RUN GOOS=linux go build -o server
+RUN GOOS=linux go build -o server ./cmd/api 
 
-FROM alpine:3.20.1 
+FROM alpine:3.9 
 WORKDIR /app
-RUN apk --no-cache add curl
 RUN apk add ca-certificates
 COPY --from=build /app/server server
 CMD ["/app/server"]
