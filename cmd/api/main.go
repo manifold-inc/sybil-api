@@ -10,6 +10,7 @@ import (
 	"time"
 
 	auth "sybil-api/internal/middleware"
+	"sybil-api/internal/routes/inference"
 	"sybil-api/internal/routes/search"
 	"sybil-api/internal/setup"
 	"sybil-api/internal/shared"
@@ -73,6 +74,18 @@ func main() {
 	searchGroup.POST("/", searchManager.Search)
 	searchGroup.GET("/autocomplete", searchManager.GetAutocomplete)
 	searchGroup.POST("/sources", searchManager.GetSources)
+
+	inferenceGroup := requiredUser.Group("/v1")
+	inferenceManager, inferenceErr := inference.NewInferenceManager(core.WDB, core.RDB, core.RedisClient, core.Log, core.Client, core.Debug)
+	if inferenceErr != nil {
+		panic(inferenceErr)
+	}
+
+	inferenceGroup.POST("/chat", inferenceManager.ChatRequest)
+	inferenceGroup.POST("/completions", inferenceManager.CompletionRequest)
+
+	// Start background sync for inference services
+	go inferenceManager.StartBackgroundSync(30 * time.Second)
 
 	go func() {
 		if err := server.Start(":80"); err != nil && err != http.ErrServerClosed {
