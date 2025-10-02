@@ -2,9 +2,10 @@
 package auth
 
 import (
-	"api.go/internal/setup"
-	"api.go/internal/shared"
-	"api.go/internal/users"
+	"sybil-api/internal/setup"
+	"sybil-api/internal/shared"
+	"sybil-api/internal/users"
+
 	"github.com/labstack/echo/v4"
 )
 

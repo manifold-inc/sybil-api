@@ -10,7 +10,8 @@ import (
 	"strconv"
 	"strings"
 
-	"api.go/internal/shared"
+	"sybil-api/internal/shared"
+
 	"go.uber.org/zap"
 	"google.golang.org/api/customsearch/v1"
 	"google.golang.org/api/option"

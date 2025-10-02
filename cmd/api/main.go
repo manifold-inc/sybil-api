@@ -9,10 +9,11 @@ import (
 	"syscall"
 	"time"
 
-	auth "api.go/internal/middleware"
-	"api.go/internal/routes/search"
-	"api.go/internal/setup"
-	"api.go/internal/shared"
+	auth "sybil-api/internal/middleware"
+	"sybil-api/internal/routes/search"
+	"sybil-api/internal/setup"
+	"sybil-api/internal/shared"
+
 	"github.com/aidarkhanov/nanoid"
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/labstack/echo/v4"

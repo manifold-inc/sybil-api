@@ -7,8 +7,8 @@ import (
 	"fmt"
 	"time"
 
-	"api.go/internal/setup"
-	"api.go/internal/shared"
+	"sybil-api/internal/setup"
+	"sybil-api/internal/shared"
 )
 
 func GetUserMetadataFromKey(apiKey string, c *setup.Context) (*shared.UserMetadata, error) {

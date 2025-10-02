@@ -11,7 +11,8 @@ import (
 	"strconv"
 	"time"
 
-	"api.go/internal/shared"
+	"sybil-api/internal/shared"
+
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
 	"github.com/redis/go-redis/v9"

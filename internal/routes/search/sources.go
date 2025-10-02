@@ -5,7 +5,8 @@ import (
 	"io"
 	"net/http"
 
-	"api.go/internal/setup"
+	"sybil-api/internal/setup"
+
 	"github.com/labstack/echo/v4"
 )
 
