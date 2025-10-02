@@ -11,9 +11,6 @@ services:
     build:
       context: .
     restart: always
-    healthcheck:
-      test: ["CMD", "curl", "-f", "-X", "GET", "http://localhost/ping"]
-      interval: "1s"
   traefik:
     image: traefik:v2.3
     ports:
