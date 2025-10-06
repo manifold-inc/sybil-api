@@ -33,16 +33,18 @@ func GetUserMetadataFromKey(apiKey string, c *setup.Context) (*shared.UserMetada
 		SELECT
 		user.id,
 		user.email,
-		user.bought_credits,
-		user.allow_overspend
+		user.credits,
+		user.allow_overspend,
+		user.role
 		FROM user
 		INNER JOIN api_key ON user.id = api_key.user_id
 		WHERE api_key.id = ?
 		`, apiKey).Scan(
 			&userMetadata.UserID,
 			&userMetadata.Email,
-			&userMetadata.BoughtCredits,
+			&userMetadata.Credits,
 			&userMetadata.AllowOverspend,
+			&userMetadata.Role,
 		)
 		if err != nil {
 			if err == sql.ErrNoRows {

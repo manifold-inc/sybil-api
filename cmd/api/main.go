@@ -12,6 +12,7 @@ import (
 	auth "sybil-api/internal/middleware"
 	"sybil-api/internal/routes/inference"
 	"sybil-api/internal/routes/search"
+	"sybil-api/internal/routes/targon"
 	"sybil-api/internal/setup"
 	"sybil-api/internal/shared"
 
@@ -73,7 +74,7 @@ func main() {
 	}
 
 	searchGroup.POST("/images", searchManager.GetImages)
-	searchGroup.POST("/", searchManager.Search)
+	searchGroup.POST("", searchManager.Search)
 	searchGroup.GET("/autocomplete", searchManager.GetAutocomplete)
 	searchGroup.POST("/sources", searchManager.GetSources)
 
@@ -85,6 +86,14 @@ func main() {
 
 	inferenceGroup.POST("/chat/completions", inferenceManager.ChatRequest)
 	inferenceGroup.POST("/completions", inferenceManager.CompletionRequest)
+
+	requiredAdmin := requiredUser.Group("", auth.RequireAdmin)
+	targonGroup := requiredAdmin.Group("/models")
+	targonManager, targonErr := targon.NewTargonManager(core.WDB, core.RedisClient, core.Log)
+	if targonErr != nil {
+		panic(targonErr)
+	}
+	targonGroup.POST("", targonManager.CreateModel)
 
 	metricsGroup := server.Group("/metrics")
 	metricsGroup.Use(func(next echo.HandlerFunc) echo.HandlerFunc {

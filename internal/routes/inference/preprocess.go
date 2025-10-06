@@ -61,11 +61,11 @@ func (im *InferenceManager) preprocessOpenAIRequest(
 	// Then do the credit check using whatever max_tokens value we have
 	maxTokensf, _ := payload["max_tokens"].(float64)
 	maxTokens := uint64(maxTokensf)
-	if userInfo.BoughtCredits == 0 && !userInfo.AllowOverspend {
+	if userInfo.Credits == 0 && !userInfo.AllowOverspend {
 		c.Log.Infow(
 			"Insufficient credits",
 			"error",
-			fmt.Sprintf("have %d, need %d", userInfo.BoughtCredits, maxTokens),
+			fmt.Sprintf("have %d, need %d", userInfo.Credits, maxTokens),
 		)
 		return nil, &shared.RequestError{
 			StatusCode: 400,
@@ -99,7 +99,7 @@ func (im *InferenceManager) preprocessOpenAIRequest(
 	reqInfo := &shared.RequestInfo{
 		Body:      body,
 		UserID:    userInfo.UserID,
-		Credits:   userInfo.BoughtCredits,
+		Credits:   userInfo.Credits,
 		ID:        c.Reqid,
 		StartTime: startTime,
 		Endpoint:  endpoint,
