@@ -6,11 +6,9 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"net"
-	"net/http"
 	"strconv"
-	"time"
 
+	"sybil-api/internal/buckets"
 	"sybil-api/internal/shared"
 
 	"github.com/google/uuid"
@@ -33,12 +31,13 @@ type Core struct {
 	WDB         *sql.DB
 	RDB         *sql.DB
 	Log         *zap.SugaredLogger
+	UsageCache  *buckets.UsageCache
 	Debug       bool
-	Client      *http.Client
 }
 
 type Environment struct {
-	InstanceUUID string
+	InstanceUUID  string
+	MetricsAPIKey string
 }
 
 func (c *Core) Shutdown() {
@@ -61,6 +60,11 @@ func CreateCore() (*Core, []error) {
 		errs = append(errs, err)
 	}
 	readDSN, err := shared.SafeEnv("READ_DSN")
+	if err != nil {
+		errs = append(errs, err)
+	}
+
+	metricsAPIKey, err := shared.SafeEnv("METRICS_API_KEY")
 	if err != nil {
 		errs = append(errs, err)
 	}
@@ -123,24 +127,15 @@ func CreateCore() (*Core, []error) {
 	}
 	log := logger.Sugar()
 
-	tr := &http.Transport{
-		Dial: (&net.Dialer{
-			Timeout: 2 * time.Second,
-		}).Dial,
-		TLSHandshakeTimeout: 2 * time.Second,
-		DisableKeepAlives:   false,
-	}
-	httpClient := http.Client{Transport: tr, Timeout: 10 * time.Minute}
-
 	return &Core{
 		Debug: DEBUG,
 		Log:   log,
 		Env: Environment{
-			InstanceUUID: instanceUUID,
+			InstanceUUID:  instanceUUID,
+			MetricsAPIKey: metricsAPIKey,
 		},
 		RedisClient: redisClient,
 		RDB:         readSQLClient,
 		WDB:         sqlClient,
-		Client:      &httpClient,
 	}, nil
 }

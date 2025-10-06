@@ -16,7 +16,7 @@ func GetUserMetadataFromKey(apiKey string, c *setup.Context) (*shared.UserMetada
 	userMetadata.APIKey = apiKey
 	ctx := c.Request().Context()
 
-	userInfoCacheKey := fmt.Sprintf("v3:user:apikey:%s", apiKey)
+	userInfoCacheKey := fmt.Sprintf("v4:user:apikey:%s", apiKey)
 	userInfoCache, err := c.Core.RedisClient.Get(ctx, userInfoCacheKey).Result()
 	switch err {
 	case nil:
@@ -33,25 +33,16 @@ func GetUserMetadataFromKey(apiKey string, c *setup.Context) (*shared.UserMetada
 		SELECT
 		user.id,
 		user.email,
-		user.plan_id,
-		user.plan_credits,
 		user.bought_credits,
-		user.allow_overspend,
-		subscription_plans.requests_per_minute,
-		subscription_plans.store_data
+		user.allow_overspend
 		FROM user
 		INNER JOIN api_key ON user.id = api_key.user_id
-		INNER JOIN subscription_plans ON user.plan_id = subscription_plans.id
-		WHERE api_key.id = ? AND subscription_plans.active = 1
+		WHERE api_key.id = ?
 		`, apiKey).Scan(
 			&userMetadata.UserID,
 			&userMetadata.Email,
-			&userMetadata.PlanID,
-			&userMetadata.PlanCredits,
 			&userMetadata.BoughtCredits,
 			&userMetadata.AllowOverspend,
-			&userMetadata.RPM,
-			&userMetadata.StoreData,
 		)
 		if err != nil {
 			if err == sql.ErrNoRows {

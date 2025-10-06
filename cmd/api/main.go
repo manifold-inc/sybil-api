@@ -19,6 +19,8 @@ import (
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
+
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 func main() {
@@ -76,16 +78,29 @@ func main() {
 	searchGroup.POST("/sources", searchManager.GetSources)
 
 	inferenceGroup := requiredUser.Group("/v1")
-	inferenceManager, inferenceErr := inference.NewInferenceManager(core.WDB, core.RDB, core.RedisClient, core.Log, core.Client, core.Debug)
+	inferenceManager, inferenceErr := inference.NewInferenceManager(core.WDB, core.RDB, core.RedisClient, core.Log, core.Debug)
 	if inferenceErr != nil {
 		panic(inferenceErr)
 	}
 
-	inferenceGroup.POST("/chat", inferenceManager.ChatRequest)
+	inferenceGroup.POST("/chat/completions", inferenceManager.ChatRequest)
 	inferenceGroup.POST("/completions", inferenceManager.CompletionRequest)
 
-	// Start background sync for inference services
-	go inferenceManager.StartBackgroundSync(30 * time.Second)
+	metricsGroup := server.Group("/metrics")
+	metricsGroup.Use(func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(c echo.Context) error {
+			apiKey, err := shared.ExtractAPIKey(c)
+			if err != nil {
+				return c.String(401, "Missing or invalid API key")
+			}
+
+			if apiKey != core.Env.MetricsAPIKey {
+				return c.String(401, "Unauthorized API key")
+			}
+			return next(c)
+		}
+	})
+	metricsGroup.GET("", echo.WrapHandler(promhttp.Handler()))
 
 	go func() {
 		if err := server.Start(":80"); err != nil && err != http.ErrServerClosed {

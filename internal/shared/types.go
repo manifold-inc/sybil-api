@@ -1,6 +1,9 @@
 package shared
 
-import "fmt"
+import (
+	"fmt"
+	"time"
+)
 
 type ChatMessage struct {
 	Role    string `json:"role"`
@@ -77,11 +80,81 @@ func (r *RequestError) Error() string {
 type UserMetadata struct {
 	Email          string `json:"email,omitempty"`
 	UserID         uint64 `json:"user_id,omitempty"`
-	PlanID         uint64 `json:"plan_id,omitempty"`
-	PlanCredits    uint64 `json:"plan_credits,omitempty"`
 	BoughtCredits  uint64 `json:"bought_credits,omitempty"`
 	AllowOverspend bool   `json:"allow_overspend,omitempty"`
-	RPM            int    `json:"rpm,omitempty"`
 	StoreData      bool   `json:"store_data,omitempty"`
 	APIKey         string
+}
+
+type Endpoints struct {
+	CHAT       string
+	COMPLETION string
+}
+
+var ENDPOINTS = Endpoints{CHAT: "CHAT", COMPLETION: "COMPLETION"}
+
+var ROUTES = map[string]string{
+	ENDPOINTS.CHAT:       "/v1/chat/completions",
+	ENDPOINTS.COMPLETION: "/v1/completions",
+}
+
+type RequestInfo struct {
+	Body      []byte
+	UserID    uint64
+	Credits   uint64
+	StoreData bool
+	ID        string
+	StartTime time.Time
+	Endpoint  string
+	Model     string
+	Stream    bool
+	URL       string
+}
+
+type ProcessedQueryInfo struct {
+	CreatedAt        time.Time
+	UserID           uint64
+	Model            string
+	ModelUID         string
+	Endpoint         string
+	TotalTime        time.Duration
+	TimeToFirstToken time.Duration
+	Usage            *Usage
+	Cost             ResponseInfoCost
+	TotalCredits     uint64
+	ID               string
+	ResponseContent  string
+	RequestContent   []byte
+}
+
+// Usage tracks token usage for API requests
+type Usage struct {
+	PromptTokens     uint64
+	CompletionTokens uint64
+	TotalTokens      uint64
+	IsCanceled       bool
+}
+
+// ResponseInfo contains information about the completed request
+type ResponseInfo struct {
+	Completed        bool
+	Canceled         bool
+	TotalTime        time.Duration
+	TimeToFirstToken time.Duration
+	Usage            *Usage
+	ResponseContent  string
+	Cost             ResponseInfoCost
+	ModelUID         string
+}
+type ResponseInfoCost struct {
+	InputCredits    uint64
+	OutputCredits   uint64
+	CanceledCredits uint64
+}
+
+type OpenAIError struct {
+	Message string `json:"message"`
+	Object  string `json:"object"`
+	Type    string `json:"Type"`
+	Code    int    `json:"code"`
 }

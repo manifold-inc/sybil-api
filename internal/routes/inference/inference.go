@@ -5,7 +5,6 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"net/http"
 
 	"github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
@@ -16,11 +15,10 @@ type InferenceManager struct {
 	RDB         *sql.DB
 	RedisClient *redis.Client
 	Log         *zap.SugaredLogger
-	Client      *http.Client
 	Debug       bool
 }
 
-func NewInferenceManager(wdb *sql.DB, rdb *sql.DB, redisClient *redis.Client, log *zap.SugaredLogger, client *http.Client, debug bool) (*InferenceManager, error) {
+func NewInferenceManager(wdb *sql.DB, rdb *sql.DB, redisClient *redis.Client, log *zap.SugaredLogger, debug bool) (*InferenceManager, error) {
 	// check if the databases are connected
 	err := wdb.Ping()
 	if err != nil {
@@ -42,7 +40,6 @@ func NewInferenceManager(wdb *sql.DB, rdb *sql.DB, redisClient *redis.Client, lo
 		RDB:         rdb,
 		RedisClient: redisClient,
 		Log:         log,
-		Client:      client,
 		Debug:       debug,
 	}, nil
 }

@@ -11,6 +11,15 @@ services:
     build:
       context: .
     restart: always
+
+  cache:
+    image: redis/redis-stack-server:latest
+    healthcheck:
+      test: ["CMD", "redis-cli", "--raw", "incr", "ping"]
+      interval: "3s"
+    volumes:
+      - cache:/data
+
   traefik:
     image: traefik:v2.3
     ports:
@@ -21,3 +30,6 @@ services:
 
 volumes:
   traefik-public-certificates:
+  cache:
+    driver: local
+

@@ -1,0 +1,318 @@
+package inference
+
+import (
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"slices"
+	"sybil-api/internal/setup"
+	"sybil-api/internal/shared"
+	"sync"
+	"time"
+
+	"github.com/labstack/echo/v4"
+)
+
+func (im *InferenceManager) ChatRequest(c echo.Context) error {
+	return im.ProcessOpenaiRequest(c, shared.ENDPOINTS.CHAT)
+}
+
+func (im *InferenceManager) CompletionRequest(c echo.Context) error {
+	return im.ProcessOpenaiRequest(c, shared.ENDPOINTS.COMPLETION)
+}
+
+func (im *InferenceManager) preprocessOpenAIRequest(
+	c *setup.Context,
+	endpoint string,
+) (*shared.RequestInfo, *shared.RequestError) {
+	startTime := time.Now()
+
+	userInfo := c.User
+
+	// Ensure properly formatted request
+	body, _ := io.ReadAll(c.Request().Body)
+
+	// Unmarshal to generic map to set defaults
+	var payload map[string]any
+	err := json.Unmarshal(body, &payload)
+	if err != nil {
+		c.Log.Warnw("failed json unmarshal to payload map", "error", err.Error())
+		return nil, &shared.RequestError{StatusCode: 400, Err: errors.New("malformed request")}
+	}
+
+	// validate models and set defaults
+	model, ok := payload["model"]
+	if !ok {
+		c.Log.Infow("missing model parameter", "error", "model is required")
+		return nil, &shared.RequestError{StatusCode: 400, Err: errors.New("model is required")}
+	}
+
+	modelName := model.(string)
+
+	// Log request start
+	c.Log.Infow("Request started")
+
+	// First set the default max_tokens if not provided
+	if _, ok := payload["max_tokens"]; !ok {
+		payload["max_tokens"] = 512
+	}
+
+	// Then do the credit check using whatever max_tokens value we have
+	maxTokensf, _ := payload["max_tokens"].(float64)
+	maxTokens := uint64(maxTokensf)
+	if userInfo.BoughtCredits == 0 && !userInfo.AllowOverspend {
+		c.Log.Infow(
+			"Insufficient credits",
+			"error",
+			fmt.Sprintf("have %d, need %d", userInfo.BoughtCredits, maxTokens),
+		)
+		return nil, &shared.RequestError{
+			StatusCode: 400,
+			Err: errors.New(
+				"insufficient credits",
+			),
+		}
+	}
+
+	// Set stream default if not specified
+	if val, ok := payload["stream"]; !ok || val == nil {
+		payload["stream"] = true
+	}
+
+	stream := payload["stream"].(bool)
+
+	// If streaming is enabled (either by default or explicitly), include usage data
+	if stream {
+		payload["stream_options"] = map[string]any{
+			"include_usage": true,
+		}
+	}
+
+	// repackage body
+	body, err = json.Marshal(payload)
+	if err != nil {
+		c.Log.Errorw("Failed to marshal request body", "error", err.Error())
+		return nil, &shared.RequestError{StatusCode: 500, Err: errors.New("internal server error")}
+	}
+
+	reqInfo := &shared.RequestInfo{
+		Body:      body,
+		UserID:    userInfo.UserID,
+		Credits:   userInfo.BoughtCredits,
+		ID:        c.Reqid,
+		StartTime: startTime,
+		Endpoint:  endpoint,
+		Model:     modelName,
+		Stream:    stream,
+	}
+
+	return reqInfo, nil
+}
+
+func (im *InferenceManager) ProcessOpenaiRequest(cc echo.Context, endpoint string) error {
+	c := cc.(*setup.Context)
+
+	reqInfo, preprocessError := im.preprocessOpenAIRequest(c, endpoint)
+	if preprocessError != nil {
+		if preprocessError.StatusCode >= 500 {
+			c.Log.Warnw("Preprocess error", "error", preprocessError.Err.Error())
+		}
+		return c.String(preprocessError.StatusCode, preprocessError.Error())
+	}
+
+	c.Core.UsageCache.AddInFlightToBucket(reqInfo.UserID)
+
+	// ensure we remove inflight BEFORE we add this to a bucket
+	mu := sync.Mutex{}
+	mu.Lock()
+	defer func() {
+		c.Core.UsageCache.RemoveInFlightFromBucket(reqInfo.UserID)
+		mu.Unlock()
+	}()
+
+	resInfo, qerr := im.QueryModels(c, reqInfo)
+	if qerr != nil {
+		c.Log.Warnw("failed request", "error", qerr.Error())
+
+		/* TODO: Revisit overload logic
+		if qerr.StatusCode == 502 {
+			overload.TrackTPS(
+				c.Core,
+				c.ModelDNS,
+				1,
+			)
+		} */
+
+		return c.JSON(qerr.StatusCode, shared.OpenAIError{
+			Message: qerr.Error(),
+			Object:  "error",
+			Type:    "InternalError",
+			Code:    qerr.StatusCode,
+		})
+	}
+
+	// Extract usage data from the response content
+	if resInfo.ResponseContent == "" || !resInfo.Completed {
+		_ = c.JSON(500, shared.OpenAIError{
+			Message: "no response from model",
+			Object:  "error",
+			Type:    "InternalError",
+			Code:    500,
+		})
+	}
+
+	// Asynchronously process request and return to the user
+	core := c.Core
+	log := c.Log
+	go func() {
+		switch true {
+		case !resInfo.Completed:
+			break
+		case reqInfo.Stream:
+			var chunks []map[string]any
+			err := json.Unmarshal([]byte(resInfo.ResponseContent), &chunks)
+			if err != nil {
+				log.Errorw(
+					"Failed to unmarshal streaming ResponseContent as JSON array of chunks",
+					"error",
+					err,
+					"raw_response_content",
+					resInfo.ResponseContent,
+				)
+				break
+			}
+			slices.Reverse(chunks)
+			for i, chunk := range chunks {
+				usageData, usageFieldExists := chunk["usage"]
+				if usageFieldExists && usageData != nil {
+					if extractedUsage, extractErr := extractUsageData(chunk); extractErr == nil {
+						resInfo.Usage = extractedUsage
+						break
+					}
+					log.Warnw(
+						"Failed to extract usage data from a response chunk that had a non-null usage field",
+						"chunk_index",
+						i,
+					)
+					break
+				}
+			}
+		case !reqInfo.Stream:
+			// Not a streaming request, expect a single JSON object
+			var singleResponse map[string]any
+			err := json.Unmarshal([]byte(resInfo.ResponseContent), &singleResponse)
+			if err != nil {
+				log.Errorw(
+					"Failed to unmarshal non-streaming ResponseContent as single JSON object",
+					"error",
+					err,
+					"raw_response_content",
+					resInfo.ResponseContent,
+				)
+				break
+			}
+			usageData, usageFieldExists := singleResponse["usage"]
+			if usageFieldExists && usageData != nil {
+				if extractedUsage, extractErr := extractUsageData(singleResponse); extractErr == nil {
+					resInfo.Usage = extractedUsage
+					break
+				}
+				log.Warnw(
+					"Failed to extract usage data from single response object that had a non-null usage field",
+				)
+			}
+		default:
+			break
+		}
+
+		// Ensure resInfo.Usage is not nil before saving (this is a good fallback)
+		if resInfo.Usage == nil {
+			resInfo.Usage = &shared.Usage{IsCanceled: resInfo.Canceled}
+		}
+
+		log.Infow(
+			"Request processing completed",
+			"time_to_first_token",
+			resInfo.TimeToFirstToken,
+			"total_time",
+			resInfo.TotalTime,
+		)
+
+		totalCredits := shared.CalculateCredits(resInfo.Usage, resInfo.Cost.InputCredits, resInfo.Cost.OutputCredits, resInfo.Cost.CanceledCredits)
+
+		pqi := &shared.ProcessedQueryInfo{
+			UserID:           reqInfo.UserID,
+			Model:            reqInfo.Model,
+			Endpoint:         reqInfo.Endpoint,
+			TotalTime:        resInfo.TotalTime,
+			TimeToFirstToken: resInfo.TimeToFirstToken,
+			Usage:            resInfo.Usage,
+			Cost:             resInfo.Cost,
+			TotalCredits:     totalCredits,
+			ResponseContent:  resInfo.ResponseContent,
+			RequestContent:   reqInfo.Body,
+			CreatedAt:        time.Now(),
+			ID:               reqInfo.ID,
+			ModelUID:         resInfo.ModelUID,
+		}
+
+		/* TODO: ditto
+		if resInfo.Completed {
+			overload.TrackTPS(
+				core,
+				modelDNS,
+				float64(resInfo.Usage.CompletionTokens)/resInfo.TotalTime.Seconds(),
+			)
+		}
+		*/
+		mu.Lock()
+		core.UsageCache.AddRequestToBucket(reqInfo.UserID, pqi, reqInfo.ID)
+		mu.Unlock()
+	}()
+
+	return nil
+}
+
+// Helper function to safely extract float64 values from a map
+func getTokenCount(usageData map[string]any, field string) (uint64, error) {
+	value, ok := usageData[field]
+	if !ok {
+		return 0, fmt.Errorf("missing %s field", field)
+	}
+	floatVal, ok := value.(float64)
+	if !ok {
+		return 0, fmt.Errorf("invalid type for %s field", field)
+	}
+	return uint64(floatVal), nil
+}
+
+// Helper function to safely extract usage data from response
+func extractUsageData(response map[string]any) (*shared.Usage, error) {
+	usageData, ok := response["usage"].(map[string]any)
+	if !ok {
+		return nil, errors.New("missing or invalid usage data")
+	}
+
+	promptTokens, err := getTokenCount(usageData, "prompt_tokens")
+	if err != nil {
+		return nil, fmt.Errorf("error getting prompt tokens: %w", err)
+	}
+
+	completionTokens, err := getTokenCount(usageData, "completion_tokens")
+	if err != nil {
+		return nil, fmt.Errorf("error getting completion tokens: %w", err)
+	}
+
+	totalTokens, err := getTokenCount(usageData, "total_tokens")
+	if err != nil {
+		return nil, fmt.Errorf("error getting total tokens: %w", err)
+	}
+
+	return &shared.Usage{
+		PromptTokens:     promptTokens,
+		CompletionTokens: completionTokens,
+		TotalTokens:      totalTokens,
+		IsCanceled:       false,
+	}, nil
+}

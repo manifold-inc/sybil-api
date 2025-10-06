@@ -70,3 +70,18 @@ func DerefString(s *string) string {
 	}
 	return ""
 }
+
+// CalculateCredits calculates the number of credits used based on token usage and model
+func CalculateCredits(usage *Usage, icpt uint64, ocpt uint64, crc uint64) uint64 {
+	if usage == nil {
+		return 0
+	}
+	if usage.IsCanceled {
+		return crc
+	}
+	inputCredits := icpt * usage.PromptTokens
+	outputCredits := ocpt * usage.CompletionTokens
+
+	// Calculate total cost using the model's cpt
+	return inputCredits + outputCredits
+}
