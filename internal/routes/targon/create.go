@@ -245,7 +245,9 @@ func (t *TargonManager) CreateModel(cc echo.Context) error {
 	}
 	t.Log.Infow("Model inserted into database", "model", req.BaseModel, "model_id", modelID)
 
-	go t.pollAndEnableModel(c.Request().Context(), targonResp.UID, req.SupportedModelNames, uint64(modelID))
+	// Pass model metadata to polling function (avoid unnecessary DB query)
+	go t.pollAndEnableModel(c.Request().Context(), targonResp.UID, req.SupportedModelNames, uint64(modelID),
+		icpt, ocpt, crc, req.Private, req.Modality, allowedUserID)
 
 	return c.JSON(http.StatusOK, map[string]any{
 		"model_id":   modelID,
@@ -377,7 +379,8 @@ func buildTargonRequest(req CreateModelRequest) (TargonCreateRequest, error) {
 	}, nil
 }
 
-func (t *TargonManager) pollAndEnableModel(ctx context.Context, targonUID string, modelNames []string, modelID uint64) {
+func (t *TargonManager) pollAndEnableModel(ctx context.Context, targonUID string, modelNames []string, modelID uint64,
+	icpt, ocpt, crc uint64, private bool, modality string, allowedUserID *uint64) {
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
 
@@ -446,17 +449,50 @@ func (t *TargonManager) pollAndEnableModel(ctx context.Context, targonUID string
 						t.Log.Errorw("Failed to insert into model_registry",
 							"error", err,
 							"model_name", modelName)
-					} else {
-						t.Log.Infow("Model registered",
+						continue
+					}
+
+					t.Log.Infow("Model registered",
+						"model_name", modelName,
+						"url", targonResp.Status.URL)
+
+					// Cache full model details
+					cacheKey := fmt.Sprintf("model:service:%s", modelName)
+					serviceCache := map[string]interface{}{
+						"model_id":        modelID,
+						"url":             targonResp.Status.URL,
+						"icpt":            icpt,
+						"ocpt":            ocpt,
+						"crc":             crc,
+						"private":         private,
+						"modality":        modality,
+						"allowed_user_id": allowedUserID,
+					}
+					cacheJSON, err := json.Marshal(serviceCache)
+					if err != nil {
+						t.Log.Warnw("Failed to marshal service cache",
+							"error", err,
+							"model_name", modelName)
+						continue
+					}
+
+					if err := t.RedisClient.Set(ctx, cacheKey, cacheJSON, 30*time.Minute).Err(); err != nil {
+						t.Log.Warnw("Failed to cache model service in Redis",
+							"error", err,
 							"model_name", modelName,
-							"url", targonResp.Status.URL)
+							"cache_key", cacheKey)
+					} else {
+						t.Log.Infow("Model service cached in Redis",
+							"model_name", modelName,
+							"url", targonResp.Status.URL,
+							"ttl", "30m")
 					}
 				}
 
 				// Update models table to enabled=true
-				_, err := t.WDB.ExecContext(ctx, "UPDATE models SET enabled = true WHERE id = ?", modelID)
-				if err != nil {
-					t.Log.Errorw("Failed to update model enabled status", "error", err, "model_id", modelID)
+				_, updateErr := t.WDB.ExecContext(ctx, "UPDATE models SET enabled = true WHERE id = ?", modelID)
+				if updateErr != nil {
+					t.Log.Errorw("Failed to update model enabled status", "error", updateErr, "model_id", modelID)
 				}
 
 				t.Log.Infow("Targon model is ready and enabled", "targon_uid", targonUID, "model_id", modelID)
