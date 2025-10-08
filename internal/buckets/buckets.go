@@ -1,4 +1,4 @@
-// Package buckets whic handles bucketting user usage to charge user
+// Package buckets which handles bucketing user usage to charge user
 package buckets
 
 import (
@@ -101,8 +101,8 @@ func (b *bucket) AddRequest(c *UsageCache, pqi *shared.ProcessedQueryInfo, reque
 
 	// Case inflight requests and fresh bucket, set timer
 	if b.totalCredits == 0 && b.timer == nil {
-		c.log.Info("Registering flush for 1 minute")
-		b.timer = time.AfterFunc(time.Minute, func() {
+		c.log.Info("Registering flush for bucket")
+		b.timer = time.AfterFunc(shared.BucketFlushInterval, func() {
 			retry := c.Flush(b.userID)
 			for retry != 0 {
 				c.log.Warn("Flush requested retry, waiting...")
@@ -112,19 +112,20 @@ func (b *bucket) AddRequest(c *UsageCache, pqi *shared.ProcessedQueryInfo, reque
 		})
 	}
 	b.totalCredits += pqi.TotalCredits
+	modelLabel := fmt.Sprintf("%d", pqi.ModelID)
 	metrics.InflightRequests.WithLabelValues(fmt.Sprintf("%d", pqi.UserID)).Set(float64(b.inflight))
-	metrics.RequestDuration.WithLabelValues(pqi.ModelUID, pqi.Endpoint).Observe(pqi.TotalTime.Seconds())
+	metrics.RequestDuration.WithLabelValues(modelLabel, pqi.Endpoint).Observe(pqi.TotalTime.Seconds())
 	if pqi.TimeToFirstToken != time.Duration(0) {
-		metrics.TimeToFirstToken.WithLabelValues(pqi.ModelUID, pqi.Endpoint).Observe(pqi.TimeToFirstToken.Seconds())
+		metrics.TimeToFirstToken.WithLabelValues(modelLabel, pqi.Endpoint).Observe(pqi.TimeToFirstToken.Seconds())
 	}
 	creditsUsed := shared.CalculateCredits(pqi.Usage, pqi.Cost.InputCredits, pqi.Cost.OutputCredits, pqi.Cost.CanceledCredits)
-	metrics.CreditUsage.WithLabelValues(pqi.ModelUID, pqi.Endpoint, "total").Add(float64(creditsUsed))
-	metrics.RequestCount.WithLabelValues(pqi.ModelUID, pqi.Endpoint, "success").Inc()
+	metrics.CreditUsage.WithLabelValues(modelLabel, pqi.Endpoint, "total").Add(float64(creditsUsed))
+	metrics.RequestCount.WithLabelValues(modelLabel, pqi.Endpoint, "success").Inc()
 	if pqi.Usage != nil {
-		metrics.TokensPerSecond.WithLabelValues(pqi.ModelUID, pqi.Endpoint).Observe(float64(pqi.Usage.CompletionTokens) / pqi.TotalTime.Seconds())
-		metrics.PromptTokens.WithLabelValues(pqi.ModelUID, pqi.Endpoint).Add(float64(pqi.Usage.PromptTokens))
-		metrics.CompletionTokens.WithLabelValues(pqi.ModelUID, pqi.Endpoint).Add(float64(pqi.Usage.CompletionTokens))
-		metrics.TotalTokens.WithLabelValues(pqi.ModelUID, pqi.Endpoint).Add(float64(pqi.Usage.TotalTokens))
+		metrics.TokensPerSecond.WithLabelValues(modelLabel, pqi.Endpoint).Observe(float64(pqi.Usage.CompletionTokens) / pqi.TotalTime.Seconds())
+		metrics.PromptTokens.WithLabelValues(modelLabel, pqi.Endpoint).Add(float64(pqi.Usage.PromptTokens))
+		metrics.CompletionTokens.WithLabelValues(modelLabel, pqi.Endpoint).Add(float64(pqi.Usage.CompletionTokens))
+		metrics.TotalTokens.WithLabelValues(modelLabel, pqi.Endpoint).Add(float64(pqi.Usage.TotalTokens))
 	}
 
 	// Case no inflight requests so we should flush right away
@@ -185,7 +186,7 @@ func (c *UsageCache) Flush(userID uint64) time.Duration {
 	_, ok = c.killedBuckets[userID]
 	if ok {
 		c.mu.Unlock()
-		return 30 * time.Second
+		return shared.BucketRetryDelay
 	}
 	c.killedBuckets[userID] = b
 	delete(c.buckets, userID)
@@ -207,7 +208,7 @@ func (c *UsageCache) Flush(userID uint64) time.Duration {
 
 	success := false
 	var err error
-	for range 3 {
+	for range shared.MaxFlushRetries {
 		ctx := context.Background()
 		err = database.ExecuteTransaction(ctx, c.db, []func(*sql.Tx) error{
 			func(tx *sql.Tx) error {

@@ -5,6 +5,8 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"net/http"
+	"sybil-api/internal/shared"
 
 	"github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
@@ -16,6 +18,7 @@ type InferenceManager struct {
 	RedisClient *redis.Client
 	Log         *zap.SugaredLogger
 	Debug       bool
+	HTTPClient  *http.Client
 }
 
 func NewInferenceManager(wdb *sql.DB, rdb *sql.DB, redisClient *redis.Client, log *zap.SugaredLogger, debug bool) (*InferenceManager, error) {
@@ -35,11 +38,25 @@ func NewInferenceManager(wdb *sql.DB, rdb *sql.DB, redisClient *redis.Client, lo
 		return nil, errors.New("failed ping to redis db")
 	}
 
+	// shared http client with connection pooling
+	httpClient := &http.Client{
+		Timeout: shared.DefaultHTTPTimeout,
+		Transport: &http.Transport{
+			MaxIdleConns:        shared.DefaultMaxIdleConns,
+			MaxIdleConnsPerHost: shared.DefaultMaxIdleConnsPerHost,
+			IdleConnTimeout:     shared.DefaultIdleConnTimeout,
+			DisableKeepAlives:   false,
+			DisableCompression:  true,
+			MaxConnsPerHost:     shared.DefaultMaxConnsPerHost,
+		},
+	}
+
 	return &InferenceManager{
 		WDB:         wdb,
 		RDB:         rdb,
 		RedisClient: redisClient,
 		Log:         log,
 		Debug:       debug,
+		HTTPClient:  httpClient,
 	}, nil
 }

@@ -55,7 +55,7 @@ func (im *InferenceManager) preprocessOpenAIRequest(
 
 	// First set the default max_tokens if not provided
 	if _, ok := payload["max_tokens"]; !ok {
-		payload["max_tokens"] = 512
+		payload["max_tokens"] = shared.DefaultMaxTokens
 	}
 
 	// Then do the credit check using whatever max_tokens value we have
@@ -77,7 +77,7 @@ func (im *InferenceManager) preprocessOpenAIRequest(
 
 	// Set stream default if not specified
 	if val, ok := payload["stream"]; !ok || val == nil {
-		payload["stream"] = true
+		payload["stream"] = shared.DefaultStreamOption
 	}
 
 	stream := payload["stream"].(bool)
@@ -244,6 +244,7 @@ func (im *InferenceManager) ProcessOpenaiRequest(cc echo.Context, endpoint strin
 		pqi := &shared.ProcessedQueryInfo{
 			UserID:           reqInfo.UserID,
 			Model:            reqInfo.Model,
+			ModelID:          resInfo.ModelID,
 			Endpoint:         reqInfo.Endpoint,
 			TotalTime:        resInfo.TotalTime,
 			TimeToFirstToken: resInfo.TimeToFirstToken,
@@ -254,7 +255,6 @@ func (im *InferenceManager) ProcessOpenaiRequest(cc echo.Context, endpoint strin
 			RequestContent:   reqInfo.Body,
 			CreatedAt:        time.Now(),
 			ID:               reqInfo.ID,
-			ModelUID:         resInfo.ModelUID,
 		}
 
 		/* TODO: ditto

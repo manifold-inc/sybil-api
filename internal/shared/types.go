@@ -80,7 +80,7 @@ func (r *RequestError) Error() string {
 type UserMetadata struct {
 	Email          string `json:"email,omitempty"`
 	UserID         uint64 `json:"user_id,omitempty"`
-	Credits  uint64 `json:"credits,omitempty"`
+	Credits        uint64 `json:"credits,omitempty"`
 	AllowOverspend bool   `json:"allow_overspend,omitempty"`
 	StoreData      bool   `json:"store_data,omitempty"`
 	Role           string `json:"role,omitempty"`
@@ -116,7 +116,7 @@ type ProcessedQueryInfo struct {
 	CreatedAt        time.Time
 	UserID           uint64
 	Model            string
-	ModelUID         string
+	ModelID          uint64
 	Endpoint         string
 	TotalTime        time.Duration
 	TimeToFirstToken time.Duration
@@ -138,6 +138,7 @@ type Usage struct {
 
 // ResponseInfo contains information about the completed request
 type ResponseInfo struct {
+	ModelID          uint64
 	Completed        bool
 	Canceled         bool
 	TotalTime        time.Duration
@@ -145,7 +146,6 @@ type ResponseInfo struct {
 	Usage            *Usage
 	ResponseContent  string
 	Cost             ResponseInfoCost
-	ModelUID         string
 }
 type ResponseInfoCost struct {
 	InputCredits    uint64

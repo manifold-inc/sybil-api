@@ -1,4 +1,4 @@
-// Package auth defines middelware route based authentication
+// Package auth defines middleware route based authentication
 package auth
 
 import (

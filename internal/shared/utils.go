@@ -41,7 +41,7 @@ func ExtractAPIKey(c echo.Context) (string, error) {
 	apiKey := parts[1]
 
 	// Validate key length
-	if len(apiKey) != 32 {
+	if len(apiKey) != APIKeyLength {
 		return "", ErrInvalidKeyLen
 	}
 

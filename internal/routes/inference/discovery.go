@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"sybil-api/internal/shared"
 	"time"
 )
 
@@ -18,17 +19,15 @@ type InferenceService struct {
 	Modality string `json:"modality"`
 }
 
-// DiscoverModels finds the inference service URL and pricing for a given model name
 func (im *InferenceManager) DiscoverModels(ctx context.Context, userID uint64, modelName string) (*InferenceService, error) {
-	// 1. Try Redis cache first (fast path - no DB query needed!)
-	cacheKey := fmt.Sprintf("model:service:%s", modelName)
+	cacheKey := fmt.Sprintf("v1:model:service:%s", modelName)
 	cached, err := im.RedisClient.Get(ctx, cacheKey).Result()
 	if err == nil && cached != "" {
-		var serviceCache map[string]interface{}
+		var serviceCache map[string]any
 		if err := json.Unmarshal([]byte(cached), &serviceCache); err == nil {
 			im.Log.Debugw("Cache hit for model service", "model_name", modelName)
 
-			// Parse cached data
+			// parse cached data
 			service := &InferenceService{
 				ModelID:  uint64(serviceCache["model_id"].(float64)),
 				URL:      serviceCache["url"].(string),
@@ -39,7 +38,7 @@ func (im *InferenceManager) DiscoverModels(ctx context.Context, userID uint64, m
 				Modality: serviceCache["modality"].(string),
 			}
 
-			// Check permissions for private models
+			// check permissions for private models
 			if service.Private {
 				if allowedUserIDFloat, ok := serviceCache["allowed_user_id"].(float64); ok {
 					allowedUserID := uint64(allowedUserIDFloat)
@@ -64,23 +63,22 @@ func (im *InferenceManager) DiscoverModels(ctx context.Context, userID uint64, m
 		im.Log.Warnw("Failed to unmarshal cached model service", "error", err, "model_name", modelName)
 	}
 
-	// 2. Cache miss or error - query database (slow path)
 	im.Log.Debugw("Cache miss, querying database", "model_name", modelName)
 
 	query := `
 		SELECT 
-			mr.url,
-			m.id,
-			m.icpt,
-			m.ocpt,
-			m.crc,
-			m.private,
-			m.modality,
-			m.allowed_user_id
-		FROM model_registry mr
-		INNER JOIN models m ON mr.model_id = m.id
-		WHERE mr.model_name = ? 
-		AND m.enabled = true
+			model_registry.url,
+			models.id,
+			models.icpt,
+			models.ocpt,
+			models.crc,
+			models.private,
+			models.modality,
+			models.allowed_user_id
+		FROM model_registry
+		INNER JOIN models ON model_registry.model_id = models.id
+		WHERE model_registry.model_name = ? 
+		AND models.enabled = true
 		LIMIT 1
 	`
 
@@ -115,9 +113,13 @@ func (im *InferenceManager) DiscoverModels(ctx context.Context, userID uint64, m
 		}
 	}
 
-	// 3. Cache full service in Redis (30 minute TTL)
+	// cache full service
 	go func() {
-		serviceCache := map[string]interface{}{
+
+		cacheCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+
+		serviceCache := map[string]any{
 			"model_id":        service.ModelID,
 			"url":             service.URL,
 			"icpt":            service.ICPT,
@@ -135,7 +137,7 @@ func (im *InferenceManager) DiscoverModels(ctx context.Context, userID uint64, m
 			return
 		}
 
-		if err := im.RedisClient.Set(context.Background(), cacheKey, cacheJSON, 30*time.Minute).Err(); err != nil {
+		if err := im.RedisClient.Set(cacheCtx, cacheKey, cacheJSON, shared.ModelServiceCacheTTL).Err(); err != nil {
 			im.Log.Warnw("Failed to cache model service",
 				"error", err,
 				"model_name", modelName,

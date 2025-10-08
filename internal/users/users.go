@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"time"
 
 	"sybil-api/internal/setup"
 	"sybil-api/internal/shared"
@@ -60,7 +59,7 @@ func GetUserMetadataFromKey(apiKey string, c *setup.Context) (*shared.UserMetada
 				c.Log.Errorw("Error marshalling user info", "error", err)
 				return
 			}
-			c.Core.RedisClient.Set(ctx, userInfoCacheKey, userInfoCache, 1*time.Minute)
+			c.Core.RedisClient.Set(ctx, userInfoCacheKey, userInfoCache, shared.UserInfoCacheTTL)
 		}()
 		return &userMetadata, nil
 	}

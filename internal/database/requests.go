@@ -16,7 +16,7 @@ type DailyStats struct {
 	Date                 string
 	UserID               uint64
 	Model                string
-	ModelUID             string
+	ModelID              uint64
 	RequestCount         uint64
 	InputTokens          uint64
 	OutputTokens         uint64
@@ -50,12 +50,12 @@ func SaveRequests(db *sql.DB, qim map[string]*shared.ProcessedQueryInfo, log *za
 	}
 
 	for id, qi := range qim {
-		key := qi.ModelUID
+		key := fmt.Sprintf("%d", qi.ModelID)
 		if _, ok := aggregated[key]; !ok {
 			aggregated[key] = &DailyStats{
-				UserID:   qi.UserID,
-				Model:    qi.Model,
-				ModelUID: qi.ModelUID,
+				UserID:  qi.UserID,
+				Model:   qi.Model,
+				ModelID: qi.ModelID,
 			}
 		}
 		existing := aggregated[key]
@@ -77,13 +77,13 @@ func SaveRequests(db *sql.DB, qim map[string]*shared.ProcessedQueryInfo, log *za
 			qi.Usage.PromptTokens, qi.Usage.CompletionTokens,
 			qi.TimeToFirstToken.Milliseconds(), qi.TotalTime.Milliseconds(),
 			qi.CreatedAt,
-			qi.ModelUID,
+			qi.ModelID,
 		)
 	}
 
 	for _, val := range aggregated {
 		statsSQLStr += "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?),"
-		statsVals = append(statsVals, today, val.UserID, val.Model, val.RequestCount, val.InputTokens, val.OutputTokens, val.TotalSpend, val.TimeToFirstToken, val.TotalTime, val.CanceledRequestCount, val.ModelUID)
+		statsVals = append(statsVals, today, val.UserID, val.Model, val.RequestCount, val.InputTokens, val.OutputTokens, val.TotalSpend, val.TimeToFirstToken, val.TotalTime, val.CanceledRequestCount, val.ModelID)
 	}
 
 	requestSQLStr = strings.TrimSuffix(requestSQLStr, ",")

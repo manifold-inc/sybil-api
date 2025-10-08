@@ -170,7 +170,11 @@ func (t *TargonManager) CreateModel(cc echo.Context) error {
 		t.Log.Errorw("Failed to do http request", "error", err.Error())
 		return c.JSON(http.StatusInternalServerError, shared.ErrInternalServerError)
 	}
-	defer res.Body.Close()
+	defer func() {
+		if closeErr := res.Body.Close(); closeErr != nil {
+			t.Log.Warnw("Failed to close response body", "error", closeErr)
+		}
+	}()
 
 	resBody, err := io.ReadAll(res.Body)
 	if err != nil {
@@ -246,7 +250,8 @@ func (t *TargonManager) CreateModel(cc echo.Context) error {
 	t.Log.Infow("Model inserted into database", "model", req.BaseModel, "model_id", modelID)
 
 	// Pass model metadata to polling function (avoid unnecessary DB query)
-	go t.pollAndEnableModel(c.Request().Context(), targonResp.UID, req.SupportedModelNames, uint64(modelID),
+	// Use background context since polling should continue after HTTP request completes
+	go t.pollAndEnableModel(context.Background(), targonResp.UID, req.SupportedModelNames, uint64(modelID),
 		icpt, ocpt, crc, req.Private, req.Modality, allowedUserID)
 
 	return c.JSON(http.StatusOK, map[string]any{
@@ -364,7 +369,7 @@ func buildTargonRequest(req CreateModelRequest) (TargonCreateRequest, error) {
 		Framework:    req.Framework,
 		Predictor: TargonPredictorConfig{
 			Container: TargonCustomInferenceContainer{
-				Name:  sybilName,
+				Name:  fmt.Sprintf("%s-%s", sybilName, req.BaseModel),
 				Image: image,
 				Args:  req.Args,
 				Env:   envVars,
@@ -381,10 +386,10 @@ func buildTargonRequest(req CreateModelRequest) (TargonCreateRequest, error) {
 
 func (t *TargonManager) pollAndEnableModel(ctx context.Context, targonUID string, modelNames []string, modelID uint64,
 	icpt, ocpt, crc uint64, private bool, modality string, allowedUserID *uint64) {
-	ticker := time.NewTicker(30 * time.Second)
+	ticker := time.NewTicker(shared.TargonPollingInterval)
 	defer ticker.Stop()
 
-	maxAttempts := 120 // 120 * 30 = 60 minutes
+	maxAttempts := shared.PollingMaxAttempts
 	attempts := 0
 
 	for {
@@ -419,7 +424,9 @@ func (t *TargonManager) pollAndEnableModel(ctx context.Context, targonUID string
 			}
 
 			resBody, err := io.ReadAll(res.Body)
-			res.Body.Close() // Close immediately
+			if closeErr := res.Body.Close(); closeErr != nil {
+				t.Log.Warnw("Failed to close response body in polling", "error", closeErr)
+			}
 			if err != nil {
 				t.Log.Errorw("Failed to read response body", "error", err.Error())
 				continue
@@ -456,9 +463,9 @@ func (t *TargonManager) pollAndEnableModel(ctx context.Context, targonUID string
 						"model_name", modelName,
 						"url", targonResp.Status.URL)
 
-					// Cache full model details
-					cacheKey := fmt.Sprintf("model:service:%s", modelName)
-					serviceCache := map[string]interface{}{
+					// cache full model details
+					cacheKey := fmt.Sprintf("v1:model:service:%s", modelName)
+					serviceCache := map[string]any{
 						"model_id":        modelID,
 						"url":             targonResp.Status.URL,
 						"icpt":            icpt,
@@ -476,7 +483,7 @@ func (t *TargonManager) pollAndEnableModel(ctx context.Context, targonUID string
 						continue
 					}
 
-					if err := t.RedisClient.Set(ctx, cacheKey, cacheJSON, 30*time.Minute).Err(); err != nil {
+					if err := t.RedisClient.Set(ctx, cacheKey, cacheJSON, shared.ModelServiceCacheTTL).Err(); err != nil {
 						t.Log.Warnw("Failed to cache model service in Redis",
 							"error", err,
 							"model_name", modelName,
@@ -506,7 +513,7 @@ func (t *TargonManager) pollAndEnableModel(ctx context.Context, targonUID string
 
 // clean up orphaned Targon service if anything goes wrong
 func (t *TargonManager) cleanupTargonService(targonUID string) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), shared.TargonCleanupTimeout)
 	defer cancel()
 
 	url := fmt.Sprintf("%s/v1/inference/%s", t.TargonEndpoint, targonUID)
@@ -526,7 +533,11 @@ func (t *TargonManager) cleanupTargonService(targonUID string) error {
 			"targon_uid", targonUID)
 		return err
 	}
-	defer res.Body.Close()
+	defer func() {
+		if closeErr := res.Body.Close(); closeErr != nil {
+			t.Log.Warnw("Failed to close response body during cleanup", "error", closeErr)
+		}
+	}()
 
 	if res.StatusCode != http.StatusOK && res.StatusCode != http.StatusNoContent {
 		resBody, _ := io.ReadAll(res.Body)
