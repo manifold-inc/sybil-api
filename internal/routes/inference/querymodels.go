@@ -51,6 +51,7 @@ func (im *InferenceManager) QueryModels(c *setup.Context, req *shared.RequestInf
 	for key, value := range headers {
 		r.Header.Set(key, value)
 	}
+	// TODO: Consider how this impacts cold starts. will cancel the request if it takes too long.
 	ctx, cancel := context.WithCancel(c.Request().Context())
 	timer := time.AfterFunc(shared.DefaultRequestTimeout, func() {
 		if req.Stream {

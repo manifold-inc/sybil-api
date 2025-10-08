@@ -115,30 +115,30 @@ func SaveRequests(db *sql.DB, qim map[string]*shared.ProcessedQueryInfo, log *za
 
 func UpdateUserCredits(ctx context.Context, tx *sql.Tx, userID uint64, creditsUsed uint64) error {
 	// First try to use as many plan credits as possible
-	var boughtCredits uint64
-	var endBoughtCredits uint64
+	var credits uint64
+	var endCredits uint64
 
 	// Get current plan credits for the user
-	err := tx.QueryRowContext(ctx, "SELECT bought_credits FROM user WHERE id = ? FOR UPDATE", userID).Scan(&boughtCredits)
+	err := tx.QueryRowContext(ctx, "SELECT credits FROM user WHERE id = ? FOR UPDATE", userID).Scan(&credits)
 	if err != nil {
 		return fmt.Errorf("failed to get current plan credits: %w", err)
 	}
 
 	// Cant use max because of uint overflow
-	if creditsUsed > boughtCredits {
-		endBoughtCredits = 0
+	if creditsUsed > credits {
+		endCredits = 0
 	} else {
-		endBoughtCredits = boughtCredits - creditsUsed
+		endCredits = credits - creditsUsed
 	}
 	// Update user's plan credits
 	_, err = tx.ExecContext(ctx, `
     UPDATE user 
-    SET bought_credits = ?
+    SET credits = ?
     WHERE id = ?`,
-		endBoughtCredits, userID,
+		endCredits, userID,
 	)
 	if err != nil {
-		return fmt.Errorf("failed to update plan credits: %w", err)
+		return fmt.Errorf("failed to update credits: %w", err)
 	}
 
 	return err

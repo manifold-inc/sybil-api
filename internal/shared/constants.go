@@ -1,4 +1,3 @@
-// Package shared
 package shared
 
 import "time"
