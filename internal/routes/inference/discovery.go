@@ -34,26 +34,22 @@ func (im *InferenceManager) DiscoverModels(ctx context.Context, userID uint64, m
 				ICPT:     uint64(serviceCache["icpt"].(float64)),
 				OCPT:     uint64(serviceCache["ocpt"].(float64)),
 				CRC:      uint64(serviceCache["crc"].(float64)),
-				Private:  serviceCache["private"].(bool),
 				Modality: serviceCache["modality"].(string),
 			}
 
-			// check permissions for private models
-			if service.Private {
-				if allowedUserIDFloat, ok := serviceCache["allowed_user_id"].(float64); ok {
-					allowedUserID := uint64(allowedUserIDFloat)
-					if allowedUserID != userID {
-						im.Log.Warnw("Access denied to private model (from cache)",
-							"model_name", modelName,
-							"user_id", userID,
-							"allowed_user_id", allowedUserID)
-						return nil, fmt.Errorf("access denied: model is private")
-					}
-				} else {
-					// allowed_user_id is nil, deny access
+			// check permissions for private models (indicated by non-null allowed_user_id)
+			if allowedUserIDFloat, ok := serviceCache["allowed_user_id"].(float64); ok && allowedUserIDFloat > 0 {
+				// This is a private model with a specific allowed user
+				allowedUserID := uint64(allowedUserIDFloat)
+				if allowedUserID != userID {
+					im.Log.Warnw("Access denied to private model (from cache)",
+						"model_name", modelName,
+						"user_id", userID,
+						"allowed_user_id", allowedUserID)
 					return nil, fmt.Errorf("access denied: model is private")
 				}
 			}
+			// If allowed_user_id is null/missing/0, it's a public model - allow access
 
 			im.Log.Debugw("Model service retrieved from cache",
 				"model_name", modelName,

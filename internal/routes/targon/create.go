@@ -20,7 +20,6 @@ import (
 type CreateModelRequest struct {
 	BaseModel           string   `json:"base_model"`
 	SupportedModelNames []string `json:"supported_model_names,omitempty"`
-	Private             bool     `json:"private,omitempty"`
 	AllowedUserID       uint64   `json:"allowed_user_id,omitempty"`
 	Modality            string   `json:"modality"`
 	SupportedEndpoints  []string `json:"supported_endpoints"`
@@ -204,11 +203,6 @@ func (t *TargonManager) CreateModel(cc echo.Context) error {
 		crc = req.Pricing.CRC
 	}
 
-	var allowedUserID *uint64
-	if req.Private && req.AllowedUserID > 0 {
-		allowedUserID = &req.AllowedUserID
-	}
-
 	// Marshal supported_endpoints to JSON
 	supportedEndpointsJSON, err := json.Marshal(req.SupportedEndpoints)
 	if err != nil {
@@ -216,8 +210,13 @@ func (t *TargonManager) CreateModel(cc echo.Context) error {
 		return c.JSON(http.StatusInternalServerError, shared.ErrInternalServerError)
 	}
 
+	var allowedUserID *uint64
+	if req.AllowedUserID > 0 {
+		allowedUserID = &req.AllowedUserID
+	}
+
 	insertModelsQuery := `
-		INSERT INTO models (
+		INSERT INTO model (
 			name, 
 			modality,
 			icpt,
@@ -226,13 +225,12 @@ func (t *TargonManager) CreateModel(cc echo.Context) error {
 			description,
 			supported_endpoints,
 			allowed_user_id,
-			private,
 			enabled,
 			config
 		) VALUES (
-		 ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		 ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`
-	result, err := t.WDB.ExecContext(c.Request().Context(), insertModelsQuery, req.BaseModel, req.Modality, icpt, ocpt, crc, req.Description, supportedEndpointsJSON, allowedUserID, req.Private, false, targonReqJSON)
+	result, err := t.WDB.ExecContext(c.Request().Context(), insertModelsQuery, req.BaseModel, req.Modality, icpt, ocpt, crc, req.Description, string(supportedEndpointsJSON), allowedUserID, false, string(targonReqJSON))
 	if err != nil {
 		t.Log.Errorw("Failed to insert model into database", "error", err)
 		// Try to cleanup the orphaned Targon service
@@ -249,17 +247,18 @@ func (t *TargonManager) CreateModel(cc echo.Context) error {
 	}
 	t.Log.Infow("Model inserted into database", "model", req.BaseModel, "model_id", modelID)
 
-	// Pass model metadata to polling function (avoid unnecessary DB query)
-	// Use background context since polling should continue after HTTP request completes
-	go t.pollAndEnableModel(context.Background(), targonResp.UID, req.SupportedModelNames, uint64(modelID),
-		icpt, ocpt, crc, req.Private, req.Modality, allowedUserID)
+	modelNames := req.SupportedModelNames
+	modelNames = append(modelNames, req.BaseModel)
+
+	go t.pollAndEnableModel(context.Background(), targonResp.UID, modelNames, uint64(modelID),
+		icpt, ocpt, crc, req.Modality, req.AllowedUserID)
 
 	return c.JSON(http.StatusOK, map[string]any{
 		"model_id":   modelID,
 		"targon_uid": targonResp.UID,
 		"name":       targonResp.Name,
 		"status":     "creating",
-		"message":    fmt.Sprintf("Model creation initiated. Polling targon GET /models/%s for status", targonResp.UID),
+		"message":    "Model creation initiated. Polling targon for status.",
 	})
 
 }
@@ -357,19 +356,20 @@ func buildTargonRequest(req CreateModelRequest) (TargonCreateRequest, error) {
 			CustomAnnotations:      req.ScalingConfig.CustomAnnotations,
 		}
 	}
-	sybilID, err := nanoid.Generate(nanoid.DefaultAlphabet, 10)
+	sybilID, err := nanoid.Generate("0123456789abcdefghijklmnopqrstuvwxyz", 10)
 	if err != nil {
 		return TargonCreateRequest{}, errors.New("failed to generate nanoid")
 	}
 	sybilName := fmt.Sprintf("sybil-%s", sybilID)
 
+	containerName := fmt.Sprintf("%s-%s", sybilName, req.BaseModel)
 	return TargonCreateRequest{
 		Name:         sybilName,
 		ResourceName: req.ResourceName,
 		Framework:    req.Framework,
 		Predictor: TargonPredictorConfig{
 			Container: TargonCustomInferenceContainer{
-				Name:  fmt.Sprintf("%s-%s", sybilName, req.BaseModel),
+				Name:  containerName,
 				Image: image,
 				Args:  req.Args,
 				Env:   envVars,
@@ -385,7 +385,7 @@ func buildTargonRequest(req CreateModelRequest) (TargonCreateRequest, error) {
 }
 
 func (t *TargonManager) pollAndEnableModel(ctx context.Context, targonUID string, modelNames []string, modelID uint64,
-	icpt, ocpt, crc uint64, private bool, modality string, allowedUserID *uint64) {
+	icpt, ocpt, crc uint64, modality string, allowedUserID uint64) {
 	ticker := time.NewTicker(shared.TargonPollingInterval)
 	defer ticker.Stop()
 
@@ -471,7 +471,6 @@ func (t *TargonManager) pollAndEnableModel(ctx context.Context, targonUID string
 						"icpt":            icpt,
 						"ocpt":            ocpt,
 						"crc":             crc,
-						"private":         private,
 						"modality":        modality,
 						"allowed_user_id": allowedUserID,
 					}
@@ -497,7 +496,7 @@ func (t *TargonManager) pollAndEnableModel(ctx context.Context, targonUID string
 				}
 
 				// Update models table to enabled=true
-				_, updateErr := t.WDB.ExecContext(ctx, "UPDATE models SET enabled = true WHERE id = ?", modelID)
+				_, updateErr := t.WDB.ExecContext(ctx, "UPDATE model SET enabled = true, targon_uid = ? WHERE id = ?", targonUID, modelID)
 				if updateErr != nil {
 					t.Log.Errorw("Failed to update model enabled status", "error", updateErr, "model_id", modelID)
 				}
