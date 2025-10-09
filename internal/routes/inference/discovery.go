@@ -15,7 +15,6 @@ type InferenceService struct {
 	ICPT     uint64 `json:"icpt"`
 	OCPT     uint64 `json:"ocpt"`
 	CRC      uint64 `json:"crc"`
-	Private  bool   `json:"private"`
 	Modality string `json:"modality"`
 }
 
@@ -64,17 +63,16 @@ func (im *InferenceManager) DiscoverModels(ctx context.Context, userID uint64, m
 	query := `
 		SELECT 
 			model_registry.url,
-			models.id,
-			models.icpt,
-			models.ocpt,
-			models.crc,
-			models.private,
-			models.modality,
-			models.allowed_user_id
+			model.id,
+			model.icpt,
+			model.ocpt,
+			model.crc,
+			model.modality,
+			model.allowed_user_id
 		FROM model_registry
-		INNER JOIN models ON model_registry.model_id = models.id
+		INNER JOIN model ON model_registry.model_id = model.id
 		WHERE model_registry.model_name = ? 
-		AND models.enabled = true
+		AND model.enabled = true
 		LIMIT 1
 	`
 
@@ -86,7 +84,6 @@ func (im *InferenceManager) DiscoverModels(ctx context.Context, userID uint64, m
 		&service.ICPT,
 		&service.OCPT,
 		&service.CRC,
-		&service.Private,
 		&service.Modality,
 		&allowedUserID,
 	)
@@ -99,8 +96,8 @@ func (im *InferenceManager) DiscoverModels(ctx context.Context, userID uint64, m
 	}
 
 	// Check permissions for private models
-	if service.Private {
-		if allowedUserID == nil || *allowedUserID != userID {
+	if allowedUserID != nil {
+		if *allowedUserID != userID {
 			im.Log.Warnw("Access denied to private model",
 				"model_name", modelName,
 				"user_id", userID,
@@ -121,7 +118,6 @@ func (im *InferenceManager) DiscoverModels(ctx context.Context, userID uint64, m
 			"icpt":            service.ICPT,
 			"ocpt":            service.OCPT,
 			"crc":             service.CRC,
-			"private":         service.Private,
 			"modality":        service.Modality,
 			"allowed_user_id": allowedUserID,
 		}

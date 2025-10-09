@@ -13,6 +13,7 @@ import (
 	"sybil-api/internal/metrics"
 	"sybil-api/internal/setup"
 	"sybil-api/internal/shared"
+	"sync/atomic"
 	"time"
 
 	"github.com/labstack/echo/v4"
@@ -51,10 +52,12 @@ func (im *InferenceManager) QueryModels(c *setup.Context, req *shared.RequestInf
 	for key, value := range headers {
 		r.Header.Set(key, value)
 	}
-	// TODO: Consider how this impacts cold starts. will cancel the request if it takes too long.
+	// Handle cold starts - models scaling from 0 can take time to load
+	var timeoutOccurred atomic.Bool
 	ctx, cancel := context.WithCancel(c.Request().Context())
 	timer := time.AfterFunc(shared.DefaultRequestTimeout, func() {
 		if req.Stream {
+			timeoutOccurred.Store(true)
 			cancel()
 		}
 	})
@@ -74,6 +77,12 @@ func (im *InferenceManager) QueryModels(c *setup.Context, req *shared.RequestInf
 		}
 	}()
 	canceled := c.Request().Context().Err() == context.Canceled
+	if err != nil && timeoutOccurred.Load() {
+		c.Log.Warnw("Request timed out - likely due to model cold start", "model", req.Model, "user_id", req.UserID)
+		metrics.ErrorCount.WithLabelValues(req.Model, req.Endpoint, fmt.Sprintf("%d", req.UserID), "cold_start").Inc()
+		return nil, &shared.RequestError{StatusCode: 408, Err: errors.New("cold start detected, please try again in a few minutes")}
+	}
+
 	if err != nil && !canceled {
 		c.Log.Warnw("Failed to send request", "error", err)
 		metrics.ErrorCount.WithLabelValues(req.Model, req.Endpoint, fmt.Sprintf("%d", req.UserID), "request_failed").Inc()
