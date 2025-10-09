@@ -226,11 +226,12 @@ func (t *TargonManager) CreateModel(cc echo.Context) error {
 			supported_endpoints,
 			allowed_user_id,
 			enabled,
-			config
+			config,
+			targon_uid
 		) VALUES (
-		 ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		 ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`
-	result, err := t.WDB.ExecContext(c.Request().Context(), insertModelsQuery, req.BaseModel, req.Modality, icpt, ocpt, crc, req.Description, string(supportedEndpointsJSON), allowedUserID, false, string(targonReqJSON))
+	result, err := t.WDB.ExecContext(c.Request().Context(), insertModelsQuery, req.BaseModel, req.Modality, icpt, ocpt, crc, req.Description, string(supportedEndpointsJSON), allowedUserID, false, string(targonReqJSON), targonResp.UID)
 	if err != nil {
 		t.Log.Errorw("Failed to insert model into database", "error", err)
 		// Try to cleanup the orphaned Targon service
@@ -496,7 +497,7 @@ func (t *TargonManager) pollAndEnableModel(ctx context.Context, targonUID string
 				}
 
 				// Update models table to enabled=true
-				_, updateErr := t.WDB.ExecContext(ctx, "UPDATE model SET enabled = true, targon_uid = ? WHERE id = ?", targonUID, modelID)
+				_, updateErr := t.WDB.ExecContext(ctx, "UPDATE model SET enabled = true WHERE id = ?", modelID)
 				if updateErr != nil {
 					t.Log.Errorw("Failed to update model enabled status", "error", updateErr, "model_id", modelID)
 				}
