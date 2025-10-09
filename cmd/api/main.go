@@ -94,6 +94,7 @@ func main() {
 		panic(targonErr)
 	}
 	targonGroup.POST("", targonManager.CreateModel)
+	targonGroup.DELETE("/:id", targonManager.DeleteModel)
 
 	metricsGroup := server.Group("/metrics")
 	metricsGroup.Use(func(next echo.HandlerFunc) echo.HandlerFunc {

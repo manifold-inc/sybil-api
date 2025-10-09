@@ -29,7 +29,7 @@ type DailyStats struct {
 // SaveRequests saves the request details and updates user credits
 func SaveRequests(db *sql.DB, qim map[string]*shared.ProcessedQueryInfo, log *zap.SugaredLogger) error {
 	requestSQLStr := `INSERT INTO request (
-            user_id, request_id, model, endpoint,
+            user_id, request_id, endpoint,
             prompt_tokens, completion_tokens,
             time_to_first_token, total_time, created_at, model_id
         ) VALUES`
@@ -71,9 +71,9 @@ func SaveRequests(db *sql.DB, qim map[string]*shared.ProcessedQueryInfo, log *za
 			existing.CanceledRequestCount += 1
 			continue
 		}
-		requestSQLStr += "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?),"
+		requestSQLStr += "(?, ?, ?, ?, ?, ?, ?, ?, ?),"
 		requestVals = append(requestVals,
-			qi.UserID, id, qi.Model, qi.Endpoint,
+			qi.UserID, id, qi.Endpoint,
 			qi.Usage.PromptTokens, qi.Usage.CompletionTokens,
 			qi.TimeToFirstToken.Milliseconds(), qi.TotalTime.Milliseconds(),
 			qi.CreatedAt,

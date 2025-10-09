@@ -9,8 +9,9 @@ const (
 	DefaultMaxIdleConnsPerHost = 10
 	DefaultIdleConnTimeout     = 90 * time.Second
 	DefaultMaxConnsPerHost     = 50
-	DefaultRequestTimeout      = 120 * time.Second
-	DefaultShutdownTimeout     = 10 * time.Minute
+	// TODO: Consider how this impacts cold starts. will cancel the request if it takes too long.
+	DefaultRequestTimeout  = 15 * time.Minute
+	DefaultShutdownTimeout = 10 * time.Minute
 )
 
 // Cache Configuration
