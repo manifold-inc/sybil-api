@@ -51,7 +51,7 @@ func queryGoogleAutocomplete(c *setup.Context, googleACURL string, query string)
 		return nil, fmt.Errorf("autocomplete failed with status: %d", res.StatusCode)
 	}
 
-	resBody, err := io.ReadAll(res.Request.Body)
+	resBody, err := io.ReadAll(res.Body)
 	if err != nil {
 		c.Log.Warnw("Failed to read response body", "error", err.Error())
 	}
