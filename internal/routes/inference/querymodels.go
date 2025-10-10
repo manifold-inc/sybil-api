@@ -80,7 +80,7 @@ func (im *InferenceManager) QueryModels(c *setup.Context, req *shared.RequestInf
 	if err != nil && timeoutOccurred.Load() {
 		c.Log.Warnw("Request timed out - likely due to model cold start", "model", req.Model, "user_id", req.UserID)
 		metrics.ErrorCount.WithLabelValues(req.Model, req.Endpoint, fmt.Sprintf("%d", req.UserID), "cold_start").Inc()
-		return nil, &shared.RequestError{StatusCode: 408, Err: errors.New("cold start detected, please try again in a few minutes")}
+		return nil, &shared.RequestError{StatusCode: 503, Err: errors.New("cold start detected, please try again in a few minutes")}
 	}
 
 	if err != nil && !canceled {

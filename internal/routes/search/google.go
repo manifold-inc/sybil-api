@@ -12,19 +12,23 @@ import (
 
 	"sybil-api/internal/shared"
 
+	"github.com/labstack/echo/v4"
 	"go.uber.org/zap"
 	"google.golang.org/api/customsearch/v1"
 	"google.golang.org/api/option"
 )
+
+type InferenceFunc func(c echo.Context, endpoint string) error
 
 type SearchManager struct {
 	GoogleSearchEngineID string
 	GoogleAPIKey         string
 	GoogleService        *customsearch.Service
 	GoogleACURL          string
+	QueryInference       InferenceFunc
 }
 
-func NewSearchManager() (*SearchManager, []error) {
+func NewSearchManager(queryInference InferenceFunc) (*SearchManager, []error) {
 	var errs []error
 
 	googleSearchEngineID, err := shared.SafeEnv("GOOGLE_SEARCH_ENGINE_ID")
@@ -55,6 +59,7 @@ func NewSearchManager() (*SearchManager, []error) {
 		GoogleAPIKey:         googleAPIKey,
 		GoogleService:        googleService,
 		GoogleACURL:          googleACURL,
+		QueryInference:       queryInference,
 	}, nil
 
 }

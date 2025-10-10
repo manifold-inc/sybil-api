@@ -67,17 +67,6 @@ func main() {
 	withUser := e.Group("", auth.ExtractUser)
 	requiredUser := withUser.Group("", auth.RequireUser)
 
-	searchGroup := requiredUser.Group("/search")
-	searchManager, err := search.NewSearchManager()
-	if err != nil {
-		panic(err)
-	}
-
-	searchGroup.POST("/images", searchManager.GetImages)
-	searchGroup.POST("", searchManager.Search)
-	searchGroup.GET("/autocomplete", searchManager.GetAutocomplete)
-	searchGroup.POST("/sources", searchManager.GetSources)
-
 	inferenceGroup := requiredUser.Group("/v1")
 	inferenceManager, inferenceErr := inference.NewInferenceManager(core.WDB, core.RDB, core.RedisClient, core.Log, core.Debug)
 	if inferenceErr != nil {
@@ -86,6 +75,17 @@ func main() {
 
 	inferenceGroup.POST("/chat/completions", inferenceManager.ChatRequest)
 	inferenceGroup.POST("/completions", inferenceManager.CompletionRequest)
+
+	searchGroup := requiredUser.Group("/search")
+	searchManager, err := search.NewSearchManager(inferenceManager.ProcessOpenaiRequest)
+	if err != nil {
+		panic(err)
+	}
+
+	searchGroup.POST("/images", searchManager.GetImages)
+	searchGroup.POST("", searchManager.Search)
+	searchGroup.GET("/autocomplete", searchManager.GetAutocomplete)
+	searchGroup.POST("/sources", searchManager.GetSources)
 
 	requiredAdmin := requiredUser.Group("", auth.RequireAdmin)
 	targonGroup := requiredAdmin.Group("/models")
