@@ -1,34 +1,32 @@
-// Package users
-package users
+package auth
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
 
-	"sybil-api/internal/setup"
 	"sybil-api/internal/shared"
 )
 
-func GetUserMetadataFromKey(apiKey string, c *setup.Context) (*shared.UserMetadata, error) {
+func (u *UserManager) getUserMetadataFromKey(apiKey string, ctx context.Context) (*shared.UserMetadata, error) {
 	var userMetadata shared.UserMetadata
 	userMetadata.APIKey = apiKey
-	ctx := c.Request().Context()
 
 	userInfoCacheKey := fmt.Sprintf("v4:user:apikey:%s", apiKey)
-	userInfoCache, err := c.Core.RedisClient.Get(ctx, userInfoCacheKey).Result()
+	userInfoCache, err := u.redis.Get(ctx, userInfoCacheKey).Result()
 	switch err {
 	case nil:
 		err = json.Unmarshal([]byte(userInfoCache), &userMetadata)
 		if err == nil {
 			return &userMetadata, nil
 		}
-		c.Log.Errorw("Error unmarshalling user info cache", "error", err)
+		u.log.Errorw("Error unmarshalling user info cache", "error", err)
 		fallthrough
 	default:
-		c.Log.Debugw("User cache miss", "key", userInfoCacheKey)
+		u.log.Debugw("User cache miss", "key", userInfoCacheKey)
 
-		err = c.Core.RDB.QueryRowContext(ctx, `
+		err = u.rdb.QueryRowContext(ctx, `
 		SELECT
 		user.id,
 		user.email,
@@ -47,19 +45,19 @@ func GetUserMetadataFromKey(apiKey string, c *setup.Context) (*shared.UserMetada
 		)
 		if err != nil {
 			if err == sql.ErrNoRows {
-				c.Log.Warnw("Invalid API key or inactive plan", "key", apiKey)
+				u.log.Warnw("Invalid API key or inactive plan", "key", apiKey)
 				return nil, shared.ErrUnauthorized
 			}
-			c.Log.Errorw("Database error during API key validation", "error", err)
+			u.log.Errorw("Database error during API key validation", "error", err)
 			return nil, shared.ErrUnauthorized
 		}
 		go func() {
 			userInfoCache, err := json.Marshal(userMetadata)
 			if err != nil {
-				c.Log.Errorw("Error marshalling user info", "error", err)
+				u.log.Errorw("Error marshalling user info", "error", err)
 				return
 			}
-			c.Core.RedisClient.Set(ctx, userInfoCacheKey, userInfoCache, shared.UserInfoCacheTTL)
+			u.redis.Set(ctx, userInfoCacheKey, userInfoCache, shared.UserInfoCacheTTL)
 		}()
 		return &userMetadata, nil
 	}

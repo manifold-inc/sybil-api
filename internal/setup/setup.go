@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"strconv"
 
-	"sybil-api/internal/buckets"
 	"sybil-api/internal/shared"
 
 	"github.com/google/uuid"
@@ -31,7 +30,6 @@ type Core struct {
 	WDB         *sql.DB
 	RDB         *sql.DB
 	Log         *zap.SugaredLogger
-	UsageCache  *buckets.UsageCache
 	Debug       bool
 }
 
@@ -41,9 +39,6 @@ type Environment struct {
 }
 
 func (c *Core) Shutdown() {
-	if c.UsageCache != nil {
-		c.UsageCache.Shutdown()
-	}
 	if c.RedisClient != nil {
 		_ = c.RedisClient.Close()
 	}
@@ -130,8 +125,6 @@ func CreateCore() (*Core, []error) {
 	}
 	log := logger.Sugar()
 
-	usageCache := buckets.NewUsageCache(log, sqlClient)
-
 	return &Core{
 		Debug: DEBUG,
 		Log:   log,
@@ -142,6 +135,5 @@ func CreateCore() (*Core, []error) {
 		RedisClient: redisClient,
 		RDB:         readSQLClient,
 		WDB:         sqlClient,
-		UsageCache:  usageCache,
 	}, nil
 }

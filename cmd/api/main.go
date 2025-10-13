@@ -64,8 +64,9 @@ func main() {
 		return c.String(200, "")
 	})
 
-	withUser := e.Group("", auth.ExtractUser)
-	requiredUser := withUser.Group("", auth.RequireUser)
+	userManager := auth.NewUserManager(core.RedisClient, core.RDB, core.Log.With("manager", "user_manager"))
+	withUser := e.Group("", userManager.ExtractUser)
+	requiredUser := withUser.Group("", userManager.RequireUser)
 
 	inferenceGroup := requiredUser.Group("/v1")
 	inferenceManager, inferenceErr := inference.NewInferenceManager(core.WDB, core.RDB, core.RedisClient, core.Log, core.Debug)
@@ -87,7 +88,7 @@ func main() {
 	searchGroup.GET("/autocomplete", searchManager.GetAutocomplete)
 	searchGroup.POST("/sources", searchManager.GetSources)
 
-	requiredAdmin := requiredUser.Group("", auth.RequireAdmin)
+	requiredAdmin := requiredUser.Group("", userManager.RequireAdmin)
 	targonGroup := requiredAdmin.Group("/models")
 	targonManager, targonErr := targon.NewTargonManager(core.WDB, core.RedisClient, core.Log)
 	if targonErr != nil {

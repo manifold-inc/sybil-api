@@ -2,14 +2,31 @@
 package auth
 
 import (
+	"database/sql"
+
 	"sybil-api/internal/setup"
 	"sybil-api/internal/shared"
-	"sybil-api/internal/users"
 
 	"github.com/labstack/echo/v4"
+	"github.com/redis/go-redis/v9"
+	"go.uber.org/zap"
 )
 
-func ExtractUser(next echo.HandlerFunc) echo.HandlerFunc {
+type UserManager struct {
+	redis *redis.Client
+	rdb   *sql.DB
+	log   *zap.SugaredLogger
+}
+
+func NewUserManager(r *redis.Client, rdb *sql.DB, log *zap.SugaredLogger) *UserManager {
+	return &UserManager{
+		redis: r,
+		rdb:   rdb,
+		log:   log,
+	}
+}
+
+func (u *UserManager) ExtractUser(next echo.HandlerFunc) echo.HandlerFunc {
 	return func(cc echo.Context) error {
 		c := cc.(*setup.Context)
 		c.User = nil
@@ -18,7 +35,7 @@ func ExtractUser(next echo.HandlerFunc) echo.HandlerFunc {
 		if err != nil {
 			return next(c)
 		}
-		user, err := users.GetUserMetadataFromKey(apiKey, c)
+		user, err := u.getUserMetadataFromKey(apiKey, c.Request().Context())
 		if err != nil {
 			return next(c)
 		}
@@ -28,7 +45,7 @@ func ExtractUser(next echo.HandlerFunc) echo.HandlerFunc {
 	}
 }
 
-func RequireUser(next echo.HandlerFunc) echo.HandlerFunc {
+func (u *UserManager) RequireUser(next echo.HandlerFunc) echo.HandlerFunc {
 	return func(cc echo.Context) error {
 		c := cc.(*setup.Context)
 		if c.User == nil {
@@ -38,7 +55,7 @@ func RequireUser(next echo.HandlerFunc) echo.HandlerFunc {
 	}
 }
 
-func RequireAdmin(next echo.HandlerFunc) echo.HandlerFunc {
+func (u *UserManager) RequireAdmin(next echo.HandlerFunc) echo.HandlerFunc {
 	return func(cc echo.Context) error {
 		c := cc.(*setup.Context)
 		if c.User == nil || c.User.Role != "admin" {

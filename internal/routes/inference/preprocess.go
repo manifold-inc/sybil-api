@@ -6,10 +6,11 @@ import (
 	"fmt"
 	"io"
 	"slices"
-	"sybil-api/internal/setup"
-	"sybil-api/internal/shared"
 	"sync"
 	"time"
+
+	"sybil-api/internal/setup"
+	"sybil-api/internal/shared"
 
 	"github.com/labstack/echo/v4"
 )
@@ -121,13 +122,13 @@ func (im *InferenceManager) ProcessOpenaiRequest(cc echo.Context, endpoint strin
 		return c.String(preprocessError.StatusCode, preprocessError.Error())
 	}
 
-	c.Core.UsageCache.AddInFlightToBucket(reqInfo.UserID)
+	im.usageCache.AddInFlightToBucket(reqInfo.UserID)
 
 	// ensure we remove inflight BEFORE we add this to a bucket
 	mu := sync.Mutex{}
 	mu.Lock()
 	defer func() {
-		c.Core.UsageCache.RemoveInFlightFromBucket(reqInfo.UserID)
+		im.usageCache.RemoveInFlightFromBucket(reqInfo.UserID)
 		mu.Unlock()
 	}()
 
@@ -163,7 +164,6 @@ func (im *InferenceManager) ProcessOpenaiRequest(cc echo.Context, endpoint strin
 	}
 
 	// Asynchronously process request and return to the user
-	core := c.Core
 	log := c.Log
 	go func() {
 		switch true {
@@ -267,7 +267,7 @@ func (im *InferenceManager) ProcessOpenaiRequest(cc echo.Context, endpoint strin
 		}
 		*/
 		mu.Lock()
-		core.UsageCache.AddRequestToBucket(reqInfo.UserID, pqi, reqInfo.ID)
+		im.usageCache.AddRequestToBucket(reqInfo.UserID, pqi, reqInfo.ID)
 		mu.Unlock()
 	}()
 

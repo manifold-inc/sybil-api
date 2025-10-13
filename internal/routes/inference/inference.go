@@ -6,6 +6,8 @@ import (
 	"database/sql"
 	"errors"
 	"net/http"
+
+	"sybil-api/internal/buckets"
 	"sybil-api/internal/shared"
 
 	"github.com/redis/go-redis/v9"
@@ -19,6 +21,7 @@ type InferenceManager struct {
 	Log         *zap.SugaredLogger
 	Debug       bool
 	HTTPClient  *http.Client
+	usageCache  *buckets.UsageCache
 }
 
 func NewInferenceManager(wdb *sql.DB, rdb *sql.DB, redisClient *redis.Client, log *zap.SugaredLogger, debug bool) (*InferenceManager, error) {
@@ -51,6 +54,8 @@ func NewInferenceManager(wdb *sql.DB, rdb *sql.DB, redisClient *redis.Client, lo
 		},
 	}
 
+	usageCache := buckets.NewUsageCache(log, wdb)
+
 	return &InferenceManager{
 		WDB:         wdb,
 		RDB:         rdb,
@@ -58,5 +63,12 @@ func NewInferenceManager(wdb *sql.DB, rdb *sql.DB, redisClient *redis.Client, lo
 		Log:         log,
 		Debug:       debug,
 		HTTPClient:  httpClient,
+		usageCache:  usageCache,
 	}, nil
+}
+
+func (im *InferenceManager) ShutDown() {
+	if im.usageCache != nil {
+		im.usageCache.Shutdown()
+	}
 }
