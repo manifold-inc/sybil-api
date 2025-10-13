@@ -41,7 +41,7 @@ func main() {
 				"request_id", "req_"+reqID,
 			)
 
-			cc := &setup.Context{Context: c, Log: logger, Reqid: reqID, Core: core}
+			cc := &setup.Context{Context: c, Log: logger, Reqid: reqID}
 			start := time.Now()
 			err := next(cc)
 			duration := time.Since(start)

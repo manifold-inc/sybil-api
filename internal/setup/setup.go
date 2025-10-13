@@ -20,7 +20,6 @@ type Context struct {
 	echo.Context
 	Log   *zap.SugaredLogger
 	Reqid string
-	Core  *Core
 	User  *shared.UserMetadata
 }
 
