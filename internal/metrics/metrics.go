@@ -9,7 +9,7 @@ import (
 var (
 	RequestDuration = promauto.NewHistogramVec(
 		prometheus.HistogramOpts{
-			Name:    "sybil-api:request_duration_seconds",
+			Name:    "sybil_api_request_duration_seconds",
 			Help:    "Total time taken for requests in seconds",
 			Buckets: []float64{1, 2.5, 5, 10, 15, 20, 25, 30, 40, 50, 75, 100, 150, 200, 350, 400, 500, 600},
 		},
@@ -18,7 +18,7 @@ var (
 
 	TimeToFirstToken = promauto.NewHistogramVec(
 		prometheus.HistogramOpts{
-			Name:    "sybil-api:time_to_first_token_seconds",
+			Name:    "sybil_api_time_to_first_token_seconds",
 			Help:    "Time to first token in seconds",
 			Buckets: []float64{.5, 1, 2.5, 5, 10, 15, 20, 25, 30, 40, 50, 75, 100, 150, 200, 350, 400, 500, 600},
 		},
@@ -27,7 +27,7 @@ var (
 
 	PromptTokens = promauto.NewCounterVec(
 		prometheus.CounterOpts{
-			Name: "sybil-api:prompt_tokens_total",
+			Name: "sybil_api_prompt_tokens_total",
 			Help: "Total number of prompt tokens used",
 		},
 		[]string{"model", "endpoint"},
@@ -35,7 +35,7 @@ var (
 
 	CompletionTokens = promauto.NewCounterVec(
 		prometheus.CounterOpts{
-			Name: "sybil-api:completion_tokens_total",
+			Name: "sybil_api_completion_tokens_total",
 			Help: "Total number of completion tokens used",
 		},
 		[]string{"model", "endpoint"},
@@ -43,7 +43,7 @@ var (
 
 	TotalTokens = promauto.NewCounterVec(
 		prometheus.CounterOpts{
-			Name: "sybil-api:total_tokens_total",
+			Name: "sybil_api_total_tokens_total",
 			Help: "Total number of tokens used",
 		},
 		[]string{"model", "endpoint"},
@@ -51,7 +51,7 @@ var (
 
 	RequestCount = promauto.NewCounterVec(
 		prometheus.CounterOpts{
-			Name: "sybil-api:request_count_total",
+			Name: "sybil_api_request_count_total",
 			Help: "Total number of requests processed",
 		},
 		[]string{"model", "endpoint", "status"},
@@ -59,7 +59,7 @@ var (
 
 	CreditUsage = promauto.NewCounterVec(
 		prometheus.CounterOpts{
-			Name: "sybil-api:credit_usage_total",
+			Name: "sybil_api_credit_usage_total",
 			Help: "Total credits used",
 		},
 		[]string{"model", "endpoint", "credit_type"},
@@ -67,7 +67,7 @@ var (
 
 	TokensPerSecond = promauto.NewHistogramVec(
 		prometheus.HistogramOpts{
-			Name:    "sybil-api:tokens_per_second",
+			Name:    "sybil_api_tokens_per_second",
 			Help:    "Tokens per second",
 			Buckets: []float64{1, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 60, 70, 80},
 		},
@@ -76,7 +76,7 @@ var (
 
 	InflightRequests = promauto.NewGaugeVec(
 		prometheus.GaugeOpts{
-			Name: "sybil-api:inflight_requests",
+			Name: "sybil_api_inflight_requests",
 			Help: "Current Inflight Requests",
 		},
 		[]string{"user_id"},
@@ -84,7 +84,7 @@ var (
 
 	CanceledRequests = promauto.NewGaugeVec(
 		prometheus.GaugeOpts{
-			Name: "sybil-api:canceled_requests",
+			Name: "sybil_api_canceled_requests",
 			Help: "Canceled Requests",
 		},
 		[]string{"user_id"},
@@ -92,7 +92,7 @@ var (
 
 	OverloadCount = promauto.NewCounterVec(
 		prometheus.CounterOpts{
-			Name: "sybil-api:overload_count",
+			Name: "sybil_api_overload_count",
 			Help: "Requests rejected from overload",
 		},
 		[]string{"model", "endpoint"},
@@ -100,14 +100,14 @@ var (
 
 	ErrorCount = promauto.NewCounterVec(
 		prometheus.CounterOpts{
-			Name: "sybil-api:error_count",
+			Name: "sybil_api_error_count",
 			Help: "Error count",
 		},
 		[]string{"model", "endpoint", "user_id", "from"},
 	)
 	ResponseCodes = promauto.NewCounterVec(
 		prometheus.CounterOpts{
-			Name: "sybil-api:status_code",
+			Name: "sybil_api_status_code",
 			Help: "Status Codes",
 		},
 		[]string{"path", "status_code", "model"},
