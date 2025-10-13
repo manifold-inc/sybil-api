@@ -13,7 +13,7 @@ func (u *UserManager) getUserMetadataFromKey(apiKey string, ctx context.Context)
 	var userMetadata shared.UserMetadata
 	userMetadata.APIKey = apiKey
 
-	userInfoCacheKey := fmt.Sprintf("v4:user:apikey:%s", apiKey)
+	userInfoCacheKey := fmt.Sprintf("sybil:v4:user:apikey:%s", apiKey)
 	userInfoCache, err := u.redis.Get(ctx, userInfoCacheKey).Result()
 	switch err {
 	case nil:

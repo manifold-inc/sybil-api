@@ -19,7 +19,7 @@ type InferenceService struct {
 }
 
 func (im *InferenceManager) DiscoverModels(ctx context.Context, userID uint64, modelName string) (*InferenceService, error) {
-	cacheKey := fmt.Sprintf("v1:model:service:%s", modelName)
+	cacheKey := fmt.Sprintf("sybil:v1:model:service:%s", modelName)
 	cached, err := im.RedisClient.Get(ctx, cacheKey).Result()
 	if err == nil && cached != "" {
 		var serviceCache map[string]any
