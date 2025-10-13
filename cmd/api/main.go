@@ -73,6 +73,7 @@ func main() {
 	if inferenceErr != nil {
 		panic(inferenceErr)
 	}
+	defer inferenceManager.ShutDown()
 
 	inferenceGroup.POST("/chat/completions", inferenceManager.ChatRequest)
 	inferenceGroup.POST("/completions", inferenceManager.CompletionRequest)
