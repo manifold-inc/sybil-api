@@ -58,7 +58,7 @@ func (u *UserManager) RequireUser(next echo.HandlerFunc) echo.HandlerFunc {
 func (u *UserManager) RequireAdmin(next echo.HandlerFunc) echo.HandlerFunc {
 	return func(cc echo.Context) error {
 		c := cc.(*setup.Context)
-		if c.User == nil || c.User.Role != "admin" {
+		if c.User == nil || c.User.Role != "ADMIN" {
 			return c.String(401, "unauthorized")
 		}
 		return next(c)
