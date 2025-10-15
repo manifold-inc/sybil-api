@@ -9,6 +9,7 @@ import (
 	"syscall"
 	"time"
 
+	"sybil-api/internal/metrics"
 	auth "sybil-api/internal/middleware"
 	"sybil-api/internal/routes/inference"
 	"sybil-api/internal/routes/search"
@@ -46,6 +47,7 @@ func main() {
 			err := next(cc)
 			duration := time.Since(start)
 			cc.Log.Infow("end_of_request", "status_code", fmt.Sprintf("%d", cc.Response().Status), "duration", duration.String())
+			metrics.ResponseCodes.WithLabelValues(cc.Path(), fmt.Sprintf("%d", cc.Response().Status)).Inc()
 			return err
 		}
 	})

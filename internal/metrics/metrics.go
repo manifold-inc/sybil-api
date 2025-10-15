@@ -90,13 +90,16 @@ var (
 		[]string{"user_id"},
 	)
 
-	OverloadCount = promauto.NewCounterVec(
-		prometheus.CounterOpts{
-			Name: "sybil_api_overload_count",
-			Help: "Requests rejected from overload",
-		},
-		[]string{"model", "endpoint"},
-	)
+	// TODO: Revisit overload logic
+	/*
+		OverloadCount = promauto.NewCounterVec(
+			prometheus.CounterOpts{
+				Name: "sybil_api_overload_count",
+				Help: "Requests rejected from overload",
+			},
+			[]string{"model", "endpoint"},
+		)
+	*/
 
 	ErrorCount = promauto.NewCounterVec(
 		prometheus.CounterOpts{
@@ -110,6 +113,7 @@ var (
 			Name: "sybil_api_status_code",
 			Help: "Status Codes",
 		},
-		[]string{"path", "status_code", "model"},
+		[]string{"path", "status_code"},
+		//we don't need model here because we know what models are being failed from error count
 	)
 )
