@@ -77,20 +77,21 @@ func (im *InferenceManager) QueryModels(c *setup.Context, req *shared.RequestInf
 		}
 	}()
 	canceled := c.Request().Context().Err() == context.Canceled
+	modelLabel := fmt.Sprintf("%d-%s", modelMetadata.ModelID, req.Model)
 	if err != nil && timeoutOccurred.Load() {
 		c.Log.Warnw("Request timed out - likely due to model cold start", "model", req.Model, "user_id", req.UserID)
-		metrics.ErrorCount.WithLabelValues(req.Model, req.Endpoint, fmt.Sprintf("%d", req.UserID), "cold_start").Inc()
+		metrics.ErrorCount.WithLabelValues(modelLabel, req.Endpoint, fmt.Sprintf("%d", req.UserID), "cold_start").Inc()
 		return nil, &shared.RequestError{StatusCode: 503, Err: errors.New("cold start detected, please try again in a few minutes")}
 	}
 
 	if err != nil && !canceled {
 		c.Log.Warnw("Failed to send request", "error", err)
-		metrics.ErrorCount.WithLabelValues(req.Model, req.Endpoint, fmt.Sprintf("%d", req.UserID), "request_failed").Inc()
+		metrics.ErrorCount.WithLabelValues(modelLabel, req.Endpoint, fmt.Sprintf("%d", req.UserID), "request_failed").Inc()
 		return nil, &shared.RequestError{StatusCode: 502, Err: errors.New("request failed")}
 	}
 	if res != nil && res.StatusCode != http.StatusOK && !canceled {
 		c.Log.Warnw("Request failed", "status_code", res.Status)
-		metrics.ErrorCount.WithLabelValues(req.Model, req.Endpoint, fmt.Sprintf("%d", req.UserID), "request_failed_from_error_code").Inc()
+		metrics.ErrorCount.WithLabelValues(modelLabel, req.Endpoint, fmt.Sprintf("%d", req.UserID), "request_failed_from_error_code").Inc()
 		return nil, &shared.RequestError{StatusCode: res.StatusCode, Err: errors.New("request failed")}
 	}
 
@@ -153,11 +154,11 @@ func (im *InferenceManager) QueryModels(c *setup.Context, req *shared.RequestInf
 		}
 		if !hasDone && ctx.Err() == nil {
 			c.Log.Errorw("encountered streaming error", "error", errors.New("[DONE] not found"))
-			metrics.ErrorCount.WithLabelValues(req.Model, req.Endpoint, fmt.Sprintf("%d", req.UserID), "streaming_no_done").Inc()
+			metrics.ErrorCount.WithLabelValues(modelLabel, req.Endpoint, fmt.Sprintf("%d", req.UserID), "streaming_no_done").Inc()
 		}
 		if err := reader.Err(); err != nil && !errors.Is(err, context.Canceled) {
 			c.Log.Errorw("encountered streaming error", "error", err)
-			metrics.ErrorCount.WithLabelValues(req.Model, req.Endpoint, fmt.Sprintf("%d", req.UserID), "streaming").Inc()
+			metrics.ErrorCount.WithLabelValues(modelLabel, req.Endpoint, fmt.Sprintf("%d", req.UserID), "streaming").Inc()
 		}
 	}
 
@@ -169,7 +170,7 @@ func (im *InferenceManager) QueryModels(c *setup.Context, req *shared.RequestInf
 		}
 		if err != nil && ctx.Err() == nil {
 			c.Log.Warnw("Failed to read non-streaming response body", "error", err)
-			metrics.ErrorCount.WithLabelValues(req.Model, req.Endpoint, fmt.Sprintf("%d", req.UserID), "query_model").Inc()
+			metrics.ErrorCount.WithLabelValues(modelLabel, req.Endpoint, fmt.Sprintf("%d", req.UserID), "query_model").Inc()
 			return nil, &shared.RequestError{StatusCode: 500, Err: errors.New("failed to read response body")}
 		}
 		responseContent = string(bodyBytes)

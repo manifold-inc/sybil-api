@@ -112,7 +112,7 @@ func (b *bucket) AddRequest(c *UsageCache, pqi *shared.ProcessedQueryInfo, reque
 		})
 	}
 	b.totalCredits += pqi.TotalCredits
-	modelLabel := fmt.Sprintf("%d", pqi.ModelID)
+	modelLabel := fmt.Sprintf("%d-%s", pqi.ModelID, pqi.Model)
 	metrics.InflightRequests.WithLabelValues(fmt.Sprintf("%d", pqi.UserID)).Set(float64(b.inflight))
 	metrics.RequestDuration.WithLabelValues(modelLabel, pqi.Endpoint).Observe(pqi.TotalTime.Seconds())
 	if pqi.TimeToFirstToken != time.Duration(0) {
