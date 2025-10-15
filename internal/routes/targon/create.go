@@ -108,8 +108,9 @@ type TargonServiceResponse struct {
 }
 
 type TargonServiceStatusResponse struct {
-	UID    string `json:"uid"`
-	Status *struct {
+	UID     string  `json:"uid"`
+	Deleted *string `json:"deleted,omitempty"`
+	Status  *struct {
 		URL   string `json:"url"`
 		Ready bool   `json:"ready"`
 	} `json:"status"`
@@ -314,13 +315,17 @@ func buildTargonRequest(req CreateModelRequest) (TargonCreateRequest, error) {
 	}
 
 	var image string
+	var defaultCommand []string
 	switch strings.ToLower(req.Framework) {
 	case "vllm":
 		image = fmt.Sprintf("vllm/vllm-openai:%s", version)
+		defaultCommand = []string{"python3", "-m", "vllm.entrypoints.openai.api_server"}
 	case "sglang":
 		image = fmt.Sprintf("lmsysorg/sglang:%s", version)
+		defaultCommand = []string{"python3", "-m", "sglang.launch_server"}
 	default:
 		image = fmt.Sprintf("vllm/vllm-openai:%s", version)
+		defaultCommand = []string{"python3", "-m", "vllm.entrypoints.openai.api_server"}
 	}
 
 	// Convert env to Targon format
@@ -346,6 +351,7 @@ func buildTargonRequest(req CreateModelRequest) (TargonCreateRequest, error) {
 		minReplicas = int32(*req.MinReplicas)
 	}
 	maxReplicas := int32(req.MaxReplicas)
+
 	// Scaling config
 	var scaling *TargonInferenceScalingConfig
 	if req.ScalingConfig != nil {
@@ -357,6 +363,7 @@ func buildTargonRequest(req CreateModelRequest) (TargonCreateRequest, error) {
 			CustomAnnotations:      req.ScalingConfig.CustomAnnotations,
 		}
 	}
+
 	sybilID, err := nanoid.Generate("0123456789abcdefghijklmnopqrstuvwxyz", 10)
 	if err != nil {
 		return TargonCreateRequest{}, errors.New("failed to generate nanoid")
@@ -370,11 +377,12 @@ func buildTargonRequest(req CreateModelRequest) (TargonCreateRequest, error) {
 		Framework:    req.Framework,
 		Predictor: TargonPredictorConfig{
 			Container: TargonCustomInferenceContainer{
-				Name:  containerName,
-				Image: image,
-				Args:  req.Args,
-				Env:   envVars,
-				Ports: []TargonPort{{ContainerPort: port, Protocol: "TCP"}},
+				Name:    containerName,
+				Image:   image,
+				Command: defaultCommand,
+				Args:    req.Args,
+				Env:     envVars,
+				Ports:   []TargonPort{{ContainerPort: port, Protocol: "TCP"}},
 			},
 			MinReplicas:          &minReplicas,
 			MaxReplicas:          maxReplicas,
@@ -384,7 +392,6 @@ func buildTargonRequest(req CreateModelRequest) (TargonCreateRequest, error) {
 		Scaling: scaling,
 	}, nil
 }
-
 func (t *TargonManager) pollAndEnableModel(ctx context.Context, targonUID string, modelNames []string, modelID uint64,
 	icpt, ocpt, crc uint64, modality string, allowedUserID uint64) {
 	ticker := time.NewTicker(shared.TargonPollingInterval)
@@ -433,10 +440,37 @@ func (t *TargonManager) pollAndEnableModel(ctx context.Context, targonUID string
 				continue
 			}
 
+			if res.StatusCode != http.StatusOK {
+				t.Log.Warnw("Targon returned non-OK status",
+					"status", res.StatusCode,
+					"body", string(resBody),
+					"targon_uid", targonUID)
+				continue
+			}
+
 			var targonResp TargonServiceStatusResponse
 			if err := json.Unmarshal(resBody, &targonResp); err != nil {
 				t.Log.Errorw("Failed to parse Targon response", "error", err.Error())
 				continue
+			}
+
+			// Check if service was deleted
+			if targonResp.Deleted != nil && *targonResp.Deleted != "" {
+				t.Log.Warnw("Targon service has been deleted, stopping polling",
+					"model_id", modelID,
+					"targon_uid", targonUID,
+					"deleted_at", *targonResp.Deleted)
+
+				// Mark model as disabled in database
+				_, err := t.WDB.ExecContext(ctx,
+					"UPDATE model SET enabled = false WHERE id = ?",
+					modelID)
+				if err != nil {
+					t.Log.Errorw("Failed to disable deleted model",
+						"error", err,
+						"model_id", modelID)
+				}
+				return
 			}
 
 			// Check if service is ready and has URL
