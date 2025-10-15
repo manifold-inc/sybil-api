@@ -87,7 +87,7 @@ var (
 			Name: "sybil_api_canceled_requests",
 			Help: "Canceled Requests",
 		},
-		[]string{"user_id"},
+		[]string{"model", "user_id"},
 	)
 
 	// TODO: Revisit overload logic

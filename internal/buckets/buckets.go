@@ -126,6 +126,9 @@ func (b *bucket) AddRequest(c *UsageCache, pqi *shared.ProcessedQueryInfo, reque
 		metrics.PromptTokens.WithLabelValues(modelLabel, pqi.Endpoint).Add(float64(pqi.Usage.PromptTokens))
 		metrics.CompletionTokens.WithLabelValues(modelLabel, pqi.Endpoint).Add(float64(pqi.Usage.CompletionTokens))
 		metrics.TotalTokens.WithLabelValues(modelLabel, pqi.Endpoint).Add(float64(pqi.Usage.TotalTokens))
+		if pqi.Usage.IsCanceled {
+			metrics.CanceledRequests.WithLabelValues(modelLabel, fmt.Sprintf("%d", pqi.UserID)).Inc()
+		}
 	}
 
 	// Case no inflight requests so we should flush right away
