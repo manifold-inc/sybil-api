@@ -31,7 +31,7 @@ const (
 	TargonPollingInterval = 30 * time.Second
 	TargonPollingMaxWait  = 60 * time.Minute
 	TargonCleanupTimeout  = 30 * time.Second
-	PollingMaxAttempts    = 120 // 120 * 30s = 60 minutes
+	PollingMaxAttempts    = 360 // 360 * 30s = 180 minutes
 )
 
 // Bucket Configuration
