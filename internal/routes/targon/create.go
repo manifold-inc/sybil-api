@@ -37,8 +37,9 @@ type CreateModelRequest struct {
 	ScalingConfig *ScalingConfig `json:"scaling,omitempty"`
 	Pricing       *Pricing       `json:"pricing,omitempty"`
 
-	ContainerConcurrency *int64 `json:"containerConcurrency,omitempty"`
-	TimeoutSeconds       *int64 `json:"timeoutSeconds,omitempty"`
+	ContainerConcurrency *int64  `json:"containerConcurrency,omitempty"`
+	TimeoutSeconds       *int64  `json:"timeoutSeconds,omitempty"`
+	SharedMemorySize     *string `json:"shared_memory_size,omitempty"`
 }
 
 type ScalingConfig struct {
@@ -72,13 +73,14 @@ type TargonPredictorConfig struct {
 }
 
 type TargonCustomInferenceContainer struct {
-	Name       string         `json:"name"`
-	Image      string         `json:"image"`
-	Command    []string       `json:"command,omitempty"`
-	Args       []string       `json:"args,omitempty"`
-	WorkingDir string         `json:"workingDir,omitempty"`
-	Ports      []TargonPort   `json:"ports,omitempty"`
-	Env        []TargonEnvVar `json:"env,omitempty"`
+	Name             string         `json:"name"`
+	Image            string         `json:"image"`
+	Command          []string       `json:"command,omitempty"`
+	Args             []string       `json:"args,omitempty"`
+	WorkingDir       string         `json:"workingDir,omitempty"`
+	Ports            []TargonPort   `json:"ports,omitempty"`
+	Env              []TargonEnvVar `json:"env,omitempty"`
+	SharedMemorySize *string        `json:"shared_memory_size,omitempty"`
 }
 
 type TargonPort struct {
@@ -285,6 +287,21 @@ func validateCreateModelRequest(req CreateModelRequest) error {
 		return errors.New("supported_model_names is required and must not be empty")
 	}
 
+	// Validate shared memory size format if provided
+	if req.SharedMemorySize != nil && *req.SharedMemorySize != "" {
+		validSizes := []string{"Gi", "G", "Mi", "M"}
+		valid := false
+		for _, suffix := range validSizes {
+			if strings.HasSuffix(*req.SharedMemorySize, suffix) {
+				valid = true
+				break
+			}
+		}
+		if !valid {
+			return errors.New("shared_memory_size must end with Gi, G, Mi, or M (e.g., '100Gi', '50G')")
+		}
+	}
+
 	// Validate scaling durations
 	if req.ScalingConfig != nil {
 		if req.ScalingConfig.ScaleToZeroGracePeriod != "" {
@@ -306,7 +323,6 @@ func validateCreateModelRequest(req CreateModelRequest) error {
 
 	return nil
 }
-
 func buildTargonRequest(req CreateModelRequest) (TargonCreateRequest, error) {
 	// Build image
 	version := req.FrameworkVersion
@@ -364,6 +380,26 @@ func buildTargonRequest(req CreateModelRequest) (TargonCreateRequest, error) {
 		}
 	}
 
+	// Auto-set shared memory if not provided - default to 100Gi for multi-GPU workloads
+	sharedMemorySize := req.SharedMemorySize
+	if sharedMemorySize == nil || *sharedMemorySize == "" {
+		// Check if this is likely a multi-GPU workload by looking at args
+		isMultiGPU := false
+		for i, arg := range req.Args {
+			if (arg == "--tp-size" || arg == "--tensor-parallel-size") && i+1 < len(req.Args) {
+				if req.Args[i+1] != "1" {
+					isMultiGPU = true
+					break
+				}
+			}
+		}
+
+		if isMultiGPU {
+			defaultSize := "100Gi"
+			sharedMemorySize = &defaultSize
+		}
+	}
+
 	sybilID, err := nanoid.Generate("0123456789abcdefghijklmnopqrstuvwxyz", 10)
 	if err != nil {
 		return TargonCreateRequest{}, errors.New("failed to generate nanoid")
@@ -377,12 +413,13 @@ func buildTargonRequest(req CreateModelRequest) (TargonCreateRequest, error) {
 		Framework:    req.Framework,
 		Predictor: TargonPredictorConfig{
 			Container: TargonCustomInferenceContainer{
-				Name:    containerName,
-				Image:   image,
-				Command: defaultCommand,
-				Args:    req.Args,
-				Env:     envVars,
-				Ports:   []TargonPort{{ContainerPort: port, Protocol: "TCP"}},
+				Name:             containerName,
+				Image:            image,
+				Command:          defaultCommand,
+				Args:             req.Args,
+				Env:              envVars,
+				Ports:            []TargonPort{{ContainerPort: port, Protocol: "TCP"}},
+				SharedMemorySize: sharedMemorySize, // Pass it to Targon
 			},
 			MinReplicas:          &minReplicas,
 			MaxReplicas:          maxReplicas,
@@ -392,6 +429,7 @@ func buildTargonRequest(req CreateModelRequest) (TargonCreateRequest, error) {
 		Scaling: scaling,
 	}, nil
 }
+
 func (t *TargonManager) pollAndEnableModel(ctx context.Context, targonUID string, modelNames []string, modelID uint64,
 	icpt, ocpt, crc uint64, modality string, allowedUserID uint64) {
 	ticker := time.NewTicker(shared.TargonPollingInterval)
