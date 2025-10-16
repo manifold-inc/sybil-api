@@ -77,6 +77,7 @@ func main() {
 	}
 	defer inferenceManager.ShutDown()
 
+	inferenceGroup.GET("/models", inferenceManager.Models)
 	inferenceGroup.POST("/chat/completions", inferenceManager.ChatRequest)
 	inferenceGroup.POST("/completions", inferenceManager.CompletionRequest)
 

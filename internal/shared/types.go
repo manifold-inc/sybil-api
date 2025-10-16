@@ -159,3 +159,5 @@ type OpenAIError struct {
 	Type    string `json:"Type"`
 	Code    int    `json:"code"`
 }
+
+const CreditsToUSD = 0.00000001
