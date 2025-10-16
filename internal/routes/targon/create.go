@@ -18,12 +18,13 @@ import (
 )
 
 type CreateModelRequest struct {
-	BaseModel           string   `json:"base_model"`
-	SupportedModelNames []string `json:"supported_model_names,omitempty"`
-	AllowedUserID       uint64   `json:"allowed_user_id,omitempty"`
-	Modality            string   `json:"modality"`
-	SupportedEndpoints  []string `json:"supported_endpoints"`
-	Description         string   `json:"description,omitempty"`
+	BaseModel           string         `json:"base_model"`
+	SupportedModelNames []string       `json:"supported_model_names,omitempty"`
+	AllowedUserID       uint64         `json:"allowed_user_id,omitempty"`
+	Modality            string         `json:"modality"`
+	SupportedEndpoints  []string       `json:"supported_endpoints"`
+	Description         string         `json:"description,omitempty"`
+	Metadata            *ModelMetadata `json:"metadata,omitempty"`
 
 	Framework        string            `json:"framework"`
 	FrameworkVersion string            `json:"framework_version"`
@@ -99,6 +100,15 @@ type TargonInferenceScalingConfig struct {
 	ScaleDownDelay         string            `json:"scaleDownDelay,omitempty"`
 	TargetConcurrency      *int64            `json:"targetConcurrency,omitempty"`
 	CustomAnnotations      map[string]string `json:"customAnnotations,omitempty"`
+}
+
+type ModelMetadata struct {
+	Name                        string   `json:"name"`
+	Quantization                string   `json:"quantization,omitempty"`
+	ContextLength               int      `json:"context_length,omitempty"`
+	MaxOutputLength             int      `json:"max_output_length,omitempty"`
+	SupportedSamplingParameters []string `json:"supported_sampling_parameters,omitempty"`
+	SupportedFeatures           []string `json:"supported_features,omitempty"`
 }
 
 type TargonServiceResponse struct {
@@ -218,6 +228,16 @@ func (t *TargonManager) CreateModel(cc echo.Context) error {
 		allowedUserID = &req.AllowedUserID
 	}
 
+	// Marshal metadata to JSON
+	var metadataJSON []byte
+	if req.Metadata != nil {
+		metadataJSON, err = json.Marshal(req.Metadata)
+		if err != nil {
+			t.Log.Errorw("Failed to marshal metadata", "error", err)
+			return c.JSON(http.StatusInternalServerError, shared.ErrInternalServerError)
+		}
+	}
+
 	insertModelsQuery := `
 		INSERT INTO model (
 			name, 
@@ -228,13 +248,14 @@ func (t *TargonManager) CreateModel(cc echo.Context) error {
 			description,
 			supported_endpoints,
 			allowed_user_id,
+			metadata,
 			enabled,
 			config,
 			targon_uid
 		) VALUES (
-		 ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		 ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`
-	result, err := t.WDB.ExecContext(c.Request().Context(), insertModelsQuery, req.BaseModel, req.Modality, icpt, ocpt, crc, req.Description, string(supportedEndpointsJSON), allowedUserID, false, string(targonReqJSON), targonResp.UID)
+	result, err := t.WDB.ExecContext(c.Request().Context(), insertModelsQuery, req.BaseModel, req.Modality, icpt, ocpt, crc, req.Description, string(supportedEndpointsJSON), allowedUserID, string(metadataJSON), false, string(targonReqJSON), targonResp.UID)
 	if err != nil {
 		t.Log.Errorw("Failed to insert model into database", "error", err)
 		// Try to cleanup the orphaned Targon service
@@ -317,6 +338,40 @@ func validateCreateModelRequest(req CreateModelRequest) error {
 		if req.ScalingConfig.ScaleDownDelay != "" {
 			if _, err := time.ParseDuration(req.ScalingConfig.ScaleDownDelay); err != nil {
 				return fmt.Errorf("invalid scale_down_delay: %w", err)
+			}
+		}
+	}
+
+	// Validate metadata
+	if req.Metadata != nil {
+		validSamplingParams := map[string]bool{
+			"temperature":        true,
+			"top_p":              true,
+			"top_k":              true,
+			"repetition_penalty": true,
+			"frequency_penalty":  true,
+			"presence_penalty":   true,
+			"stop":               true,
+			"seed":               true,
+		}
+
+		validFeatures := map[string]bool{
+			"tools":              true,
+			"json_mode":          true,
+			"structured_outputs": true,
+			"web_search":         true,
+			"reasoning":          true,
+		}
+
+		for _, param := range req.Metadata.SupportedSamplingParameters {
+			if !validSamplingParams[param] {
+				return fmt.Errorf("invalid sampling parameter: %s. Valid parameters are: temperature, top_p, top_k, repetition_penalty, frequency_penalty, presence_penalty, stop, seed", param)
+			}
+		}
+
+		for _, feature := range req.Metadata.SupportedFeatures {
+			if !validFeatures[feature] {
+				return fmt.Errorf("invalid feature: %s. Valid features are: tools, json_mode, structured_outputs, web_search, reasoning", feature)
 			}
 		}
 	}
