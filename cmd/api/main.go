@@ -100,6 +100,7 @@ func main() {
 	}
 	targonGroup.POST("", targonManager.CreateModel)
 	targonGroup.DELETE("/:id", targonManager.DeleteModel)
+	targonGroup.PATCH("", targonManager.UpdateModel)
 
 	metricsGroup := server.Group("/metrics")
 	metricsGroup.Use(func(next echo.HandlerFunc) echo.HandlerFunc {
