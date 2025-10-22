@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"sort"
 	"sybil-api/internal/database"
 	"sybil-api/internal/metrics"
 	"sybil-api/internal/shared"
@@ -209,13 +210,27 @@ func (c *UsageCache) Flush(userID uint64) time.Duration {
 		c.mu.Unlock()
 	}()
 
+	// generate ordered
+	transactions := make([]database.RequestTransaction, 0, len(b.qim))
+	for id, pqi := range b.qim {
+		transactions = append(transactions, database.RequestTransaction{
+			ID:        id,
+			CreatedAt: pqi.CreatedAt,
+			Credits:   pqi.TotalCredits,
+		})
+	}
+	// sort by oldest first
+	sort.Slice(transactions, func(i, j int) bool {
+		return transactions[i].CreatedAt.Before(transactions[j].CreatedAt)
+	})
+	
 	success := false
 	var err error
 	for range shared.MaxFlushRetries {
 		ctx := context.Background()
 		err = database.ExecuteTransaction(ctx, c.db, []func(*sql.Tx) error{
 			func(tx *sql.Tx) error {
-				return database.UpdateUserCredits(ctx, tx, userID, b.totalCredits)
+				return database.ChargeUser(ctx, tx, userID, transactions)
 			},
 		})
 		if err != nil {
