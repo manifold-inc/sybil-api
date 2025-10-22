@@ -223,7 +223,7 @@ func (c *UsageCache) Flush(userID uint64) time.Duration {
 	sort.Slice(transactions, func(i, j int) bool {
 		return transactions[i].CreatedAt.Before(transactions[j].CreatedAt)
 	})
-	
+
 	success := false
 	var err error
 	for range shared.MaxFlushRetries {

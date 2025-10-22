@@ -127,7 +127,7 @@ func ChargeUser(ctx context.Context, tx *sql.Tx, userID uint64, transactions []R
 		return fmt.Errorf("failed to get user plan data: %w", err)
 	}
 	requestsUsed := uint(len(transactions))
-	
+
 	switch {
 	case planRequests >= requestsUsed:
 		_, err = tx.ExecContext(ctx, "UPDATE user SET plan_requests = plan_requests - ? WHERE id = ?", requestsUsed, userID)
