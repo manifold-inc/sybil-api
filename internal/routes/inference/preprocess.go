@@ -116,23 +116,29 @@ func (im *InferenceManager) preprocessOpenAIRequest(
 		}, nil
 	}
 
+	// Set default max_tokens for regular users only
 	if _, ok := payload["max_tokens"]; !ok {
-		payload["max_tokens"] = shared.DefaultMaxTokens
+		if !userInfo.AllowOverspend {
+			payload["max_tokens"] = shared.DefaultMaxTokens
+		}
 	}
 
-	maxTokensf, _ := payload["max_tokens"].(float64)
-	maxTokens := uint64(maxTokensf)
-	if userInfo.Credits == 0 && !userInfo.AllowOverspend {
-		c.Log.Infow(
-			"Insufficient credits",
-			"error",
-			fmt.Sprintf("have %d, need %d", userInfo.Credits, maxTokens),
-		)
-		return nil, &shared.RequestError{
-			StatusCode: 402,
-			Err: errors.New(
-				"insufficient credits",
-			),
+	// Credit check (only for non-overspend users)
+	if !userInfo.AllowOverspend {
+		// Get max_tokens (either user-provided or default)
+		maxTokensf, _ := payload["max_tokens"].(float64)
+		maxTokens := uint64(maxTokensf)
+
+		if userInfo.Credits < maxTokens {
+			c.Log.Infow(
+				"Insufficient credits",
+				"available", userInfo.Credits,
+				"needed", maxTokens,
+			)
+			return nil, &shared.RequestError{
+				StatusCode: 402,
+				Err:        errors.New("insufficient credits"),
+			}
 		}
 	}
 
