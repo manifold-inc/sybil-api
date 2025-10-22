@@ -17,22 +17,22 @@ func (t *TargonManager) DeleteModel(cc echo.Context) error {
 
 	modelUID := c.Param("uid")
 
-	checkQuery := `SELECT id, targon_uid FROM model WHERE targon_uid = ? AND enabled = true`
+	checkQuery := `SELECT id FROM model WHERE targon_uid = ?`
 	var modelID uint64
-	var targonUID string
-	err := t.WDB.QueryRowContext(c.Request().Context(), checkQuery, modelUID).Scan(&modelID, &targonUID)
+	err := t.WDB.QueryRowContext(c.Request().Context(), checkQuery, modelUID).Scan(&modelID)
 	if err != nil {
-		return c.JSON(404, "Model not found or not enabled")
+		t.Log.Errorw("Failed to find model", "error", err, "targon_uid", modelUID)
+		return c.JSON(404, "Model not found")
 	}
 
 	// Delete from Targon
-	err = t.cleanupTargonService(targonUID)
+	err = t.cleanupTargonService(modelUID)
 	if err != nil {
 		return c.JSON(500, "Failed to delete from Targon")
 	}
 
 	// Delete from database
-	_, err = t.WDB.Exec("UPDATE model SET enabled = false WHERE targon_uid = ?", targonUID)
+	_, err = t.WDB.Exec("UPDATE model SET enabled = false WHERE targon_uid = ?", modelUID)
 	if err != nil {
 		return c.JSON(500, "Failed to delete from database")
 	}
