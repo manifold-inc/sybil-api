@@ -15,13 +15,14 @@ import (
 func (t *TargonManager) DeleteModel(cc echo.Context) error {
 	c := cc.(*setup.Context)
 
-	modelID := c.Param("id")
+	modelUID := c.Param("uid")
 
-	// Get targon_uid from database
+	checkQuery := `SELECT id, targon_uid FROM model WHERE targon_uid = ? AND enabled = true`
+	var modelID uint64
 	var targonUID string
-	err := t.WDB.QueryRow("SELECT targon_uid FROM model WHERE id = ?", modelID).Scan(&targonUID)
+	err := t.WDB.QueryRowContext(c.Request().Context(), checkQuery, modelUID).Scan(&modelID, &targonUID)
 	if err != nil {
-		return c.JSON(404, "Model not found")
+		return c.JSON(404, "Model not found or not enabled")
 	}
 
 	// Delete from Targon
@@ -31,7 +32,7 @@ func (t *TargonManager) DeleteModel(cc echo.Context) error {
 	}
 
 	// Delete from database
-	_, err = t.WDB.Exec("UPDATE model SET enabled = false WHERE id = ?", modelID)
+	_, err = t.WDB.Exec("UPDATE model SET enabled = false WHERE targon_uid = ?", targonUID)
 	if err != nil {
 		return c.JSON(500, "Failed to delete from database")
 	}

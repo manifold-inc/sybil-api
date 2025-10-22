@@ -80,6 +80,7 @@ func main() {
 	inferenceGroup.GET("/models", inferenceManager.Models)
 	inferenceGroup.POST("/chat/completions", inferenceManager.ChatRequest)
 	inferenceGroup.POST("/completions", inferenceManager.CompletionRequest)
+	inferenceGroup.POST("/embeddings", inferenceManager.EmbeddingRequest)
 
 	searchGroup := requiredUser.Group("/search")
 	searchManager, err := search.NewSearchManager(inferenceManager.ProcessOpenaiRequest)
@@ -99,7 +100,7 @@ func main() {
 		panic(targonErr)
 	}
 	targonGroup.POST("", targonManager.CreateModel)
-	targonGroup.DELETE("/:id", targonManager.DeleteModel)
+	targonGroup.DELETE("/:uid", targonManager.DeleteModel)
 	targonGroup.PATCH("", targonManager.UpdateModel)
 
 	metricsGroup := server.Group("/metrics")

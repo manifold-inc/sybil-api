@@ -23,6 +23,10 @@ func (im *InferenceManager) CompletionRequest(c echo.Context) error {
 	return im.ProcessOpenaiRequest(c, shared.ENDPOINTS.COMPLETION)
 }
 
+func (im *InferenceManager) EmbeddingRequest(c echo.Context) error {
+	return im.ProcessOpenaiRequest(c, shared.ENDPOINTS.EMBEDDING)
+}
+
 func (im *InferenceManager) preprocessOpenAIRequest(
 	c *setup.Context,
 	endpoint string,
@@ -54,12 +58,68 @@ func (im *InferenceManager) preprocessOpenAIRequest(
 	// Log request start
 	c.Log.Infow("Request started")
 
-	// First set the default max_tokens if not provided
+	if endpoint == shared.ENDPOINTS.EMBEDDING {
+
+		input, ok := payload["input"]
+		if !ok {
+			return nil, &shared.RequestError{
+				StatusCode: 400,
+				Err:        errors.New("input is required for embeddings"),
+			}
+		}
+
+		switch v := input.(type) {
+		case string:
+			if v == "" {
+				return nil, &shared.RequestError{
+					StatusCode: 400,
+					Err:        errors.New("input cannot be empty"),
+				}
+			}
+		case []any:
+			if len(v) == 0 {
+				return nil, &shared.RequestError{
+					StatusCode: 400,
+					Err:        errors.New("input array cannot be empty"),
+				}
+			}
+		default:
+			return nil, &shared.RequestError{
+				StatusCode: 400,
+				Err:        errors.New("input must be string or array of strings"),
+			}
+		}
+
+		if userInfo.Credits == 0 && !userInfo.AllowOverspend {
+			c.Log.Infow("No credits available", "user_id", userInfo.UserID)
+			return nil, &shared.RequestError{
+				StatusCode: 402,
+				Err:        errors.New("insufficient credits"),
+			}
+		}
+
+		body, err = json.Marshal(payload)
+		if err != nil {
+			c.Log.Errorw("Failed to marshal request body", "error", err.Error())
+			return nil, &shared.RequestError{StatusCode: 500, Err: errors.New("internal server error")}
+		}
+
+		return &shared.RequestInfo{
+			Body:      body,
+			UserID:    userInfo.UserID,
+			Credits:   userInfo.Credits,
+			ID:        c.Reqid,
+			StartTime: startTime,
+			Endpoint:  endpoint,
+			Model:     modelName,
+			Stream:    false,
+		}, nil
+	}
+
 	if _, ok := payload["max_tokens"]; !ok {
 		payload["max_tokens"] = shared.DefaultMaxTokens
 	}
 
-	// Then do the credit check using whatever max_tokens value we have
 	maxTokensf, _ := payload["max_tokens"].(float64)
 	maxTokens := uint64(maxTokensf)
 	if userInfo.Credits == 0 && !userInfo.AllowOverspend {
@@ -69,7 +129,7 @@ func (im *InferenceManager) preprocessOpenAIRequest(
 			fmt.Sprintf("have %d, need %d", userInfo.Credits, maxTokens),
 		)
 		return nil, &shared.RequestError{
-			StatusCode: 400,
+			StatusCode: 402,
 			Err: errors.New(
 				"insufficient credits",
 			),
@@ -186,7 +246,7 @@ func (im *InferenceManager) ProcessOpenaiRequest(cc echo.Context, endpoint strin
 			for i, chunk := range chunks {
 				usageData, usageFieldExists := chunk["usage"]
 				if usageFieldExists && usageData != nil {
-					if extractedUsage, extractErr := extractUsageData(chunk); extractErr == nil {
+					if extractedUsage, extractErr := extractUsageData(chunk, endpoint); extractErr == nil {
 						resInfo.Usage = extractedUsage
 						break
 					}
@@ -214,7 +274,7 @@ func (im *InferenceManager) ProcessOpenaiRequest(cc echo.Context, endpoint strin
 			}
 			usageData, usageFieldExists := singleResponse["usage"]
 			if usageFieldExists && usageData != nil {
-				if extractedUsage, extractErr := extractUsageData(singleResponse); extractErr == nil {
+				if extractedUsage, extractErr := extractUsageData(singleResponse, endpoint); extractErr == nil {
 					resInfo.Usage = extractedUsage
 					break
 				}
@@ -288,7 +348,7 @@ func getTokenCount(usageData map[string]any, field string) (uint64, error) {
 }
 
 // Helper function to safely extract usage data from response
-func extractUsageData(response map[string]any) (*shared.Usage, error) {
+func extractUsageData(response map[string]any, endpoint string) (*shared.Usage, error) {
 	usageData, ok := response["usage"].(map[string]any)
 	if !ok {
 		return nil, errors.New("missing or invalid usage data")
@@ -299,9 +359,12 @@ func extractUsageData(response map[string]any) (*shared.Usage, error) {
 		return nil, fmt.Errorf("error getting prompt tokens: %w", err)
 	}
 
-	completionTokens, err := getTokenCount(usageData, "completion_tokens")
-	if err != nil {
-		return nil, fmt.Errorf("error getting completion tokens: %w", err)
+	completionTokens := uint64(0)
+	if endpoint != shared.ENDPOINTS.EMBEDDING {
+		completionTokens, err = getTokenCount(usageData, "completion_tokens")
+		if err != nil {
+			return nil, fmt.Errorf("error getting completion tokens: %w", err)
+		}
 	}
 
 	totalTokens, err := getTokenCount(usageData, "total_tokens")

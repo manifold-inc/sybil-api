@@ -24,6 +24,7 @@ type Model struct {
 	Pricing                     Pricing  `json:"pricing"`
 	SupportedSamplingParameters []string `json:"supported_sampling_parameters"`
 	SupportedFeatures           []string `json:"supported_features"`
+	SupportedEndpoints          []string `json:"supported_endpoints"`
 }
 
 type Pricing struct {
@@ -85,7 +86,7 @@ func fetchModels(ctx context.Context, db *sql.DB, user *shared.UserMetadata, c *
 		c.Log.Infow("Querying user-specific models", "user_id", user.UserID)
 		if models, err := queryModels(ctx, db, c, baseQuery+`
 				SELECT name, DATE_FORMAT(created_at, '%Y-%m-%d %H:%i:%s') as created,
-					icpt, ocpt, crc, metadata, modality 
+					icpt, ocpt, crc, metadata, modality, supported_endpoints
 				FROM model 
 				WHERE enabled = true AND allowed_user_id = ?
 				ORDER BY name ASC`,
@@ -103,7 +104,7 @@ func fetchModels(ctx context.Context, db *sql.DB, user *shared.UserMetadata, c *
 		c.Log.Infow("Querying public models")
 		return queryModels(ctx, db, c, `
 			SELECT name, DATE_FORMAT(created_at, '%Y-%m-%d %H:%i:%s') as created,
-				icpt, ocpt, crc, metadata, modality 
+				icpt, ocpt, crc, metadata, modality, supported_endpoints
 			FROM model 
 			WHERE enabled = true AND allowed_user_id is NULL
 			ORDER BY name ASC`)
@@ -147,8 +148,9 @@ func scanModel(rows *sql.Rows) (Model, error) {
 	var crc uint64
 	var metadataJSON sql.NullString
 	var modality string
+	var supportedEndpointsJSON sql.NullString
 
-	if err := rows.Scan(&name, &createdAtStr, &icpt, &ocpt, &crc, &metadataJSON, &modality); err != nil {
+	if err := rows.Scan(&name, &createdAtStr, &icpt, &ocpt, &crc, &metadataJSON, &modality, &supportedEndpointsJSON); err != nil {
 		return Model{}, err
 	}
 
@@ -163,8 +165,14 @@ func scanModel(rows *sql.Rows) (Model, error) {
 		_ = json.Unmarshal([]byte(metadataJSON.String), &metadata)
 	}
 
+	var supportedEndpoints []string
+	if supportedEndpointsJSON.Valid && supportedEndpointsJSON.String != "" {
+		_ = json.Unmarshal([]byte(supportedEndpointsJSON.String), &supportedEndpoints)
+	}
+
 	model.ID = name
 	model.Created = createdAt.Unix()
+	model.SupportedEndpoints = supportedEndpoints
 
 	switch modality {
 	case "text-to-text":

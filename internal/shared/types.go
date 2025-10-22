@@ -90,13 +90,15 @@ type UserMetadata struct {
 type Endpoints struct {
 	CHAT       string
 	COMPLETION string
+	EMBEDDING  string
 }
 
-var ENDPOINTS = Endpoints{CHAT: "CHAT", COMPLETION: "COMPLETION"}
+var ENDPOINTS = Endpoints{CHAT: "CHAT", COMPLETION: "COMPLETION", EMBEDDING: "EMBEDDING"}
 
 var ROUTES = map[string]string{
 	ENDPOINTS.CHAT:       "/v1/chat/completions",
 	ENDPOINTS.COMPLETION: "/v1/completions",
+	ENDPOINTS.EMBEDDING:  "/v1/embeddings",
 }
 
 type RequestInfo struct {
