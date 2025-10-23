@@ -132,7 +132,7 @@ func ChargeUser(ctx context.Context, tx *sql.Tx, userID uint64, requestsUsed uin
 		balance := uint64(0)
 		if credits > creditsUsed {
 			balance = credits - creditsUsed
-		} 
+		}
 		_, err = tx.ExecContext(ctx, "UPDATE user SET credits = ? WHERE id = ?", balance, userID)
 		if err != nil {
 			return fmt.Errorf("failed to update user credits: %w", err)
