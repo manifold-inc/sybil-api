@@ -123,6 +123,7 @@ func (im *InferenceManager) preprocessOpenAIRequest(
 		}
 	}
 
+	// TODO: credits, requests > 0 allow request, allow overspend allow request, otherwise deny
 	// Credit check (only for non-overspend users)
 	if !userInfo.AllowOverspend {
 		// Get max_tokens (either user-provided or default)

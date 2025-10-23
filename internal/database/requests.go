@@ -26,12 +26,6 @@ type DailyStats struct {
 	CanceledRequestCount uint64
 }
 
-type RequestTransaction struct {
-	ID        string
-	CreatedAt time.Time
-	Credits   uint64
-}
-
 // SaveRequests saves the request details and updates user credits
 func SaveRequests(db *sql.DB, qim map[string]*shared.ProcessedQueryInfo, log *zap.SugaredLogger) error {
 	requestSQLStr := `INSERT INTO request (
@@ -119,14 +113,13 @@ func SaveRequests(db *sql.DB, qim map[string]*shared.ProcessedQueryInfo, log *za
 	return nil
 }
 
-func ChargeUser(ctx context.Context, tx *sql.Tx, userID uint64, transactions []RequestTransaction) error {
+func ChargeUser(ctx context.Context, tx *sql.Tx, userID uint64, requestsUsed uint, creditsUsed uint64) error {
 	var planRequests uint
 	var credits uint64
 	err := tx.QueryRowContext(ctx, "SELECT COALESCE(plan_requests, 0), credits FROM user WHERE id = ? FOR UPDATE", userID).Scan(&planRequests, &credits)
 	if err != nil {
 		return fmt.Errorf("failed to get user plan data: %w", err)
 	}
-	requestsUsed := uint(len(transactions))
 
 	switch {
 	case planRequests >= requestsUsed:
@@ -136,22 +129,13 @@ func ChargeUser(ctx context.Context, tx *sql.Tx, userID uint64, transactions []R
 		}
 		return nil
 	default:
-		// uses all plan_requests and charges for remaining requests via credits
-		creditsCharged := uint64(0)
-		for i := planRequests; i < requestsUsed; i++ {
-			creditsCharged += transactions[i].Credits
-		}
-
 		balance := uint64(0)
-		if creditsCharged < credits {
-			balance = credits - creditsCharged
-		} else {
-			balance = 0
-		}
-
-		_, err = tx.ExecContext(ctx, "UPDATE user SET plan_requests = 0, credits = ? WHERE id = ?", balance, userID)
+		if credits > creditsUsed {
+			balance = credits - creditsUsed
+		} 
+		_, err = tx.ExecContext(ctx, "UPDATE user SET credits = ? WHERE id = ?", balance, userID)
 		if err != nil {
-			return fmt.Errorf("failed to update user plan requests and credits: %w", err)
+			return fmt.Errorf("failed to update user credits: %w", err)
 		}
 		return nil
 	}
