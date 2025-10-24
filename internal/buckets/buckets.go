@@ -209,13 +209,15 @@ func (c *UsageCache) Flush(userID uint64) time.Duration {
 		c.mu.Unlock()
 	}()
 
+	requestsUsed := uint(len(b.qim))
+
 	success := false
 	var err error
 	for range shared.MaxFlushRetries {
 		ctx := context.Background()
 		err = database.ExecuteTransaction(ctx, c.db, []func(*sql.Tx) error{
 			func(tx *sql.Tx) error {
-				return database.UpdateUserCredits(ctx, tx, userID, b.totalCredits)
+				return database.ChargeUser(ctx, tx, userID, requestsUsed, b.totalCredits)
 			},
 		})
 		if err != nil {

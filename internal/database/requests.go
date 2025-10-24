@@ -113,35 +113,36 @@ func SaveRequests(db *sql.DB, qim map[string]*shared.ProcessedQueryInfo, log *za
 	return nil
 }
 
-func UpdateUserCredits(ctx context.Context, tx *sql.Tx, userID uint64, creditsUsed uint64) error {
-	// First try to use as many plan credits as possible
+func ChargeUser(ctx context.Context, tx *sql.Tx, userID uint64, requestsUsed uint, creditsUsed uint64) error {
+	var planRequests uint
 	var credits uint64
-	var endCredits uint64
-
-	// Get current plan credits for the user
-	err := tx.QueryRowContext(ctx, "SELECT credits FROM user WHERE id = ? FOR UPDATE", userID).Scan(&credits)
+	err := tx.QueryRowContext(ctx, "SELECT COALESCE(plan_requests, 0), credits FROM user WHERE id = ? FOR UPDATE", userID).Scan(&planRequests, &credits)
 	if err != nil {
-		return fmt.Errorf("failed to get current plan credits: %w", err)
+		return fmt.Errorf("failed to get user plan data: %w", err)
 	}
 
-	// Cant use max because of uint overflow
-	if creditsUsed > credits {
-		endCredits = 0
-	} else {
-		endCredits = credits - creditsUsed
+	switch {
+	case planRequests >= 1:
+		requestBalance := uint(0)
+		if planRequests > requestsUsed {
+			requestBalance = planRequests - requestsUsed
+		}
+		_, err = tx.ExecContext(ctx, "UPDATE user SET plan_requests = ? WHERE id = ?", requestBalance, userID)
+		if err != nil {
+			return fmt.Errorf("failed to update user plan requests: %w", err)
+		}
+		return nil
+	default:
+		balance := uint64(0)
+		if credits > creditsUsed {
+			balance = credits - creditsUsed
+		}
+		_, err = tx.ExecContext(ctx, "UPDATE user SET credits = ? WHERE id = ?", balance, userID)
+		if err != nil {
+			return fmt.Errorf("failed to update user credits: %w", err)
+		}
+		return nil
 	}
-	// Update user's plan credits
-	_, err = tx.ExecContext(ctx, `
-    UPDATE user 
-    SET credits = ?
-    WHERE id = ?`,
-		endCredits, userID,
-	)
-	if err != nil {
-		return fmt.Errorf("failed to update credits: %w", err)
-	}
-
-	return err
 }
 
 // ExecuteTransaction executes one transaction with one or multiple database executions.

@@ -81,6 +81,7 @@ type UserMetadata struct {
 	Email          string `json:"email,omitempty"`
 	UserID         uint64 `json:"user_id,omitempty"`
 	Credits        uint64 `json:"credits,omitempty"`
+	PlanRequests   uint   `json:"plan_requests,omitempty"`
 	AllowOverspend bool   `json:"allow_overspend,omitempty"`
 	StoreData      bool   `json:"store_data,omitempty"`
 	Role           string `json:"role,omitempty"`

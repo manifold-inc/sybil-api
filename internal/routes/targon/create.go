@@ -304,9 +304,6 @@ func validateCreateModelRequest(req CreateModelRequest) error {
 	if req.MaxReplicas < 1 {
 		return errors.New("max_replicas must be at least 1")
 	}
-	if len(req.SupportedModelNames) == 0 {
-		return errors.New("supported_model_names is required and must not be empty")
-	}
 
 	// Validate shared memory size format if provided
 	if req.SharedMemorySize != nil && *req.SharedMemorySize != "" {

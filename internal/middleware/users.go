@@ -31,6 +31,7 @@ func (u *UserManager) getUserMetadataFromKey(apiKey string, ctx context.Context)
 		user.id,
 		user.email,
 		user.credits,
+		user.plan_requests,
 		user.allow_overspend,
 		user.role
 		FROM user
@@ -40,6 +41,7 @@ func (u *UserManager) getUserMetadataFromKey(apiKey string, ctx context.Context)
 			&userMetadata.UserID,
 			&userMetadata.Email,
 			&userMetadata.Credits,
+			&userMetadata.PlanRequests,
 			&userMetadata.AllowOverspend,
 			&userMetadata.Role,
 		)
