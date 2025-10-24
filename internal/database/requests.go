@@ -122,8 +122,12 @@ func ChargeUser(ctx context.Context, tx *sql.Tx, userID uint64, requestsUsed uin
 	}
 
 	switch {
-	case planRequests >= requestsUsed:
-		_, err = tx.ExecContext(ctx, "UPDATE user SET plan_requests = plan_requests - ? WHERE id = ?", requestsUsed, userID)
+	case planRequests >= 1:
+		requestBalance := uint(0)
+		if planRequests > requestsUsed {
+			requestBalance = planRequests - requestsUsed
+		}
+		_, err = tx.ExecContext(ctx, "UPDATE user SET plan_requests = ? WHERE id = ?", requestBalance, userID)
 		if err != nil {
 			return fmt.Errorf("failed to update user plan requests: %w", err)
 		}
