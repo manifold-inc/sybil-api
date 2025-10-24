@@ -90,7 +90,7 @@ func (im *InferenceManager) preprocessOpenAIRequest(
 			}
 		}
 
-		if userInfo.Credits == 0 && !userInfo.AllowOverspend {
+		if (userInfo.Credits <= 0 && userInfo.PlanRequests <= 0) && !userInfo.AllowOverspend {
 			c.Log.Infow("No credits available", "user_id", userInfo.UserID)
 			return nil, &shared.RequestError{
 				StatusCode: 402,
@@ -123,7 +123,7 @@ func (im *InferenceManager) preprocessOpenAIRequest(
 		}
 	}
 
-	if userInfo.Credits <= 0 || userInfo.PlanRequests <= 0 || !userInfo.AllowOverspend {
+	if (userInfo.Credits <= 0 && userInfo.PlanRequests <= 0) && !userInfo.AllowOverspend {
 		return nil, &shared.RequestError{
 			StatusCode: 402,
 			Err:        errors.New("insufficient requests or credits"),
