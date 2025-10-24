@@ -169,13 +169,12 @@ func scanModel(rows *sql.Rows) (Model, error) {
 		return Model{}, err
 	}
 
-	// Handle metadata gracefully - use empty defaults if NULL
 	var metadata ModelMetadata
 	if metadataJSON.Valid && metadataJSON.String != "" {
 		_ = json.Unmarshal([]byte(metadataJSON.String), &metadata)
 	}
 
-	var supportedEndpoints []string
+	supportedEndpoints := []string{}
 	if supportedEndpointsJSON.Valid && supportedEndpointsJSON.String != "" {
 		_ = json.Unmarshal([]byte(supportedEndpointsJSON.String), &supportedEndpoints)
 	}
@@ -204,7 +203,7 @@ func scanModel(rows *sql.Rows) (Model, error) {
 	if metadata.Name != "" {
 		model.Name = metadata.Name
 	} else {
-		model.Name = name // Fallback to the model ID
+		model.Name = name
 	}
 
 	model.Quantization = metadata.Quantization
@@ -231,8 +230,14 @@ func scanModel(rows *sql.Rows) (Model, error) {
 
 	model.Pricing = pricing
 
-	model.SupportedSamplingParameters = metadata.SupportedSamplingParameters
-	model.SupportedFeatures = metadata.SupportedFeatures
+	model.SupportedSamplingParameters = []string{}
+	model.SupportedFeatures = []string{}
+	if metadata.SupportedSamplingParameters != nil {
+		model.SupportedSamplingParameters = metadata.SupportedSamplingParameters
+	}
+	if metadata.SupportedFeatures != nil {
+		model.SupportedFeatures = metadata.SupportedFeatures
+	}
 
 	// Embedding-specific metadata
 	model.OutputDimensions = metadata.OutputDimensions
