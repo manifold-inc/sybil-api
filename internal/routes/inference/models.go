@@ -25,6 +25,11 @@ type Model struct {
 	SupportedSamplingParameters []string `json:"supported_sampling_parameters"`
 	SupportedFeatures           []string `json:"supported_features"`
 	SupportedEndpoints          []string `json:"supported_endpoints"`
+	OutputDimensions            *int     `json:"output_dimensions,omitempty"`
+	MaxBatchSize                *int     `json:"max_batch_size,omitempty"`
+	Normalized                  *bool    `json:"normalized,omitempty"`
+	EmbeddingType               string   `json:"embedding_type,omitempty"`
+	MaxInputLength              *int     `json:"max_input_length,omitempty"`
 }
 
 type Pricing struct {
@@ -50,6 +55,11 @@ type ModelMetadata struct {
 	SupportedFeatures           []string `json:"supported_features"`
 	InputModalities             []string `json:"input_modalities"`
 	OutputModalities            []string `json:"output_modalities"`
+	OutputDimensions            *int     `json:"output_dimensions,omitempty"`
+	MaxBatchSize                *int     `json:"max_batch_size,omitempty"`
+	Normalized                  *bool    `json:"normalized,omitempty"`
+	EmbeddingType               string   `json:"embedding_type,omitempty"`
+	MaxInputLength              *int     `json:"max_input_length,omitempty"`
 }
 
 func (im *InferenceManager) Models(cc echo.Context) error {
@@ -181,6 +191,9 @@ func scanModel(rows *sql.Rows) (Model, error) {
 	case "text-to-image":
 		model.InputModalities = []string{"text"}
 		model.OutputModalities = []string{"image"}
+	case "text-to-embedding":
+		model.InputModalities = []string{"text"}
+		model.OutputModalities = []string{"embedding"}
 	default:
 		// Default to text if modality is not recognized
 		model.InputModalities = []string{"text"}
@@ -220,6 +233,13 @@ func scanModel(rows *sql.Rows) (Model, error) {
 
 	model.SupportedSamplingParameters = metadata.SupportedSamplingParameters
 	model.SupportedFeatures = metadata.SupportedFeatures
+
+	// Embedding-specific metadata
+	model.OutputDimensions = metadata.OutputDimensions
+	model.MaxBatchSize = metadata.MaxBatchSize
+	model.Normalized = metadata.Normalized
+	model.EmbeddingType = metadata.EmbeddingType
+	model.MaxInputLength = metadata.MaxInputLength
 
 	return model, nil
 }
