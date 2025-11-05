@@ -19,25 +19,80 @@ func (t *TargonManager) DeleteModel(cc echo.Context) error {
 
 	checkQuery := `SELECT id FROM model WHERE targon_uid = ?`
 	var modelID uint64
-	err := t.WDB.QueryRowContext(c.Request().Context(), checkQuery, modelUID).Scan(&modelID)
+	err := t.RDB.QueryRowContext(c.Request().Context(), checkQuery, modelUID).Scan(&modelID)
 	if err != nil {
 		t.Log.Errorw("Failed to find model", "error", err, "targon_uid", modelUID)
 		return c.JSON(404, "Model not found")
 	}
 
-	// Delete from Targon
+	// cache clear
+	rows, err := t.RDB.Query("SELECT model_name FROM model_registry WHERE model_id = ?", modelID)
+	if err != nil {
+		t.Log.Errorw("Failed to get model names", "error", err, "model_id", modelID)
+	}
+
+	var modelNames []string
+	if rows != nil {
+		for rows.Next() {
+			var modelName string
+			if err := rows.Scan(&modelName); err == nil {
+				modelNames = append(modelNames, modelName)
+			}
+		}
+		rows.Close()
+	}
+
+	// delete from targon
 	err = t.cleanupTargonService(modelUID)
 	if err != nil {
-		return c.JSON(500, "Failed to delete from Targon")
+		t.Log.Warnw("Failed to delete from Targon, continuing with local cleanup",
+			"error", err,
+			"targon_uid", modelUID)
 	}
 
-	// Delete from database
-	_, err = t.WDB.Exec("UPDATE model SET enabled = false WHERE targon_uid = ?", modelUID)
+	_, err = t.WDB.ExecContext(c.Request().Context(),
+		"UPDATE model SET enabled = false WHERE targon_uid = ?", modelUID)
 	if err != nil {
-		return c.JSON(500, "Failed to delete from database")
+		t.Log.Errorw("Failed to soft delete model", "error", err, "targon_uid", modelUID)
+		return c.JSON(500, map[string]string{"error": "Failed to soft delete model"})
 	}
 
-	return c.JSON(200, "Model deleted successfully")
+	_, err = t.WDB.ExecContext(c.Request().Context(),
+		"DELETE FROM model_registry WHERE model_id = ?", modelID)
+	if err != nil {
+		t.Log.Errorw("Failed to delete from model registry", "error", err, "model_id", modelID)
+		return c.JSON(500, map[string]string{"error": "Failed to delete model registry"})
+	}
+
+	// cache clear
+	go func(names []string, mid uint64) {
+		ctx := context.Background()
+		var cacheKeys []string
+		for _, modelName := range names {
+			cacheKey := fmt.Sprintf("sybil:v1:model:service:%s", modelName)
+			cacheKeys = append(cacheKeys, cacheKey)
+		}
+
+		if len(cacheKeys) > 0 {
+			if err := t.RedisClient.Del(ctx, cacheKeys...).Err(); err != nil {
+				t.Log.Warnw("Failed to clear cache for deleted model", "error", err, "model_id", mid)
+			} else {
+				t.Log.Infow("Cleared cache for deleted model", "model_id", mid, "aliases_cleared", len(cacheKeys))
+			}
+		}
+	}(modelNames, modelID)
+
+	t.Log.Infow("Successfully deleted model",
+		"targon_uid", modelUID,
+		"model_id", modelID,
+		"model_names", modelNames)
+
+	return c.JSON(200, map[string]any{
+		"message":     "Model deleted successfully",
+		"targon_uid":  modelUID,
+		"model_id":    modelID,
+		"model_names": modelNames,
+	})
 }
 
 // clean up orphaned Targon service if anything goes wrong

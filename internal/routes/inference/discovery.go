@@ -73,12 +73,14 @@ func (im *InferenceManager) DiscoverModels(ctx context.Context, userID uint64, m
 		INNER JOIN model ON model_registry.model_id = model.id
 		WHERE model_registry.model_name = ? 
 		AND model.enabled = true
+		AND (model.allowed_user_id = ? OR model.allowed_user_id IS NULL)
+		ORDER BY model.allowed_user_id DESC
 		LIMIT 1
 	`
 
 	var service InferenceService
 	var allowedUserID *uint64
-	err = im.RDB.QueryRowContext(ctx, query, modelName).Scan(
+	err = im.RDB.QueryRowContext(ctx, query, modelName, userID).Scan(
 		&service.URL,
 		&service.ModelID,
 		&service.ICPT,

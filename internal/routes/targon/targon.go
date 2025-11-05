@@ -19,15 +19,21 @@ type TargonManager struct {
 	TargonAPIKey   string
 	TargonEndpoint string
 	WDB            *sql.DB
+	RDB            *sql.DB
 	RedisClient    *redis.Client
 	HTTPClient     *http.Client
 }
 
-func NewTargonManager(sqlClient *sql.DB, redisClient *redis.Client, log *zap.SugaredLogger) (*TargonManager, error) {
+func NewTargonManager(wdb *sql.DB, rdb *sql.DB, redisClient *redis.Client, log *zap.SugaredLogger) (*TargonManager, error) {
 
-	err := sqlClient.Ping()
+	err := wdb.Ping()
 	if err != nil {
-		return nil, errors.New("failed to ping sql client")
+		return nil, errors.New("failed to ping write db")
+	}
+
+	err = rdb.Ping()
+	if err != nil {
+		return nil, errors.New("failed to ping read replica db")
 	}
 
 	err = redisClient.Ping(context.Background()).Err()
@@ -57,7 +63,8 @@ func NewTargonManager(sqlClient *sql.DB, redisClient *redis.Client, log *zap.Sug
 		Log:            log,
 		TargonAPIKey:   targonAPIKey,
 		TargonEndpoint: targonEndpoint,
-		WDB:            sqlClient,
+		WDB:            wdb,
+		RDB:            rdb,
 		RedisClient:    redisClient,
 		HTTPClient:     &httpClient,
 	}, nil

@@ -95,7 +95,7 @@ func main() {
 
 	requiredAdmin := requiredUser.Group("", userManager.RequireAdmin)
 	targonGroup := requiredAdmin.Group("/models")
-	targonManager, targonErr := targon.NewTargonManager(core.WDB, core.RedisClient, core.Log)
+	targonManager, targonErr := targon.NewTargonManager(core.WDB, core.RDB, core.RedisClient, core.Log)
 	if targonErr != nil {
 		panic(targonErr)
 	}
