@@ -55,7 +55,7 @@ func (im *InferenceManager) QueryModels(c *setup.Context, req *shared.RequestInf
 	// Handle cold starts - models scaling from 0 can take time to load
 	var timeoutOccurred atomic.Bool
 	ctx, cancel := context.WithCancel(c.Request().Context())
-	timer := time.AfterFunc(shared.DefaultRequestTimeout, func() {
+	timer := time.AfterFunc(shared.DefaultStreamRequestTimeout, func() {
 		if req.Stream {
 			timeoutOccurred.Store(true)
 			cancel()
@@ -68,7 +68,13 @@ func (im *InferenceManager) QueryModels(c *setup.Context, req *shared.RequestInf
 	r = r.WithContext(ctx)
 
 	// Start Request
+	requestStart := time.Now()
 	res, err := im.HTTPClient.Do(r)
+	requestDuration := time.Since(requestStart)
+	c.Log.Infow("HTTP request completed",
+		"duration_ms", requestDuration.Milliseconds(),
+		"model_url", modelMetadata.URL,
+		"model", req.Model)
 	defer func() {
 		if res != nil && res.Body != nil {
 			if closeErr := res.Body.Close(); closeErr != nil {
@@ -131,6 +137,12 @@ func (im *InferenceManager) QueryModels(c *setup.Context, req *shared.RequestInf
 					ttft = time.Since(req.StartTime)
 					ttftRecorded = true
 					timer.Stop()
+					queueTime := ttft.Milliseconds() - requestDuration.Milliseconds()
+					c.Log.Infow("First token received",
+						"ttft_ms", ttft.Milliseconds(),
+						"http_request_ms", requestDuration.Milliseconds(),
+						"queue_time_ms", queueTime,
+						"model", req.Model)
 				}
 				if token == "data: [DONE]" {
 					hasDone = true
@@ -184,6 +196,12 @@ func (im *InferenceManager) QueryModels(c *setup.Context, req *shared.RequestInf
 
 		// kept just for simplicity
 		ttft = time.Since(req.StartTime)
+		queueTime := ttft.Milliseconds() - requestDuration.Milliseconds()
+		c.Log.Infow("Non-streaming response completed",
+			"ttft_ms", ttft.Milliseconds(),
+			"http_request_ms", requestDuration.Milliseconds(),
+			"queue_time_ms", queueTime,
+			"model", req.Model)
 	}
 
 	resInfo := &shared.ResponseInfo{
