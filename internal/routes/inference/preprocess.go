@@ -137,6 +137,18 @@ func (im *InferenceManager) preprocessOpenAIRequest(
 		}
 	}
 
+	// Log user id 3's request parameters
+	if userInfo.UserID == 3 {
+		c.Log.Infow("User 3 request payload",
+			"model", modelName,
+			"stream", stream,
+			"max_tokens", payload["max_tokens"],
+			"temperature", payload["temperature"],
+			"top_p", payload["top_p"],
+			"frequency_penalty", payload["frequency_penalty"],
+			"presence_penalty", payload["presence_penalty"])
+	}
+
 	// repackage body
 	body, err = json.Marshal(payload)
 	if err != nil {
