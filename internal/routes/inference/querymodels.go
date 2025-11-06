@@ -22,9 +22,7 @@ import (
 // QueryModels forwards the request to the appropriate model
 func (im *InferenceManager) QueryModels(c *setup.Context, req *shared.RequestInfo) (*shared.ResponseInfo, *shared.RequestError) {
 	// Discover inference service
-	discoveryStart := time.Now()
 	modelMetadata, err := im.DiscoverModels(c.Request().Context(), req.UserID, req.Model)
-	discoveryDuration := time.Since(discoveryStart)
 	if err != nil {
 		c.Log.Errorw("Service discovery failed", "error", err, "model", req.Model)
 		return nil, &shared.RequestError{
@@ -69,10 +67,8 @@ func (im *InferenceManager) QueryModels(c *setup.Context, req *shared.RequestInf
 	}()
 	r = r.WithContext(ctx)
 
-	// Start Request (this includes DNS, connection establishment, and actual request)
-	kserveRequestStart := time.Now()
+	// Start Request
 	res, err := im.HTTPClient.Do(r)
-	kserveRequestDuration := time.Since(kserveRequestStart)
 	defer func() {
 		if res != nil && res.Body != nil {
 			if closeErr := res.Body.Close(); closeErr != nil {
@@ -190,12 +186,10 @@ func (im *InferenceManager) QueryModels(c *setup.Context, req *shared.RequestInf
 		ttft = time.Since(req.StartTime)
 	}
 
-	totalRequestTime := time.Since(req.StartTime)
-
 	resInfo := &shared.ResponseInfo{
 		Canceled:         c.Request().Context().Err() == context.Canceled,
 		Completed:        hasDone,
-		TotalTime:        totalRequestTime,
+		TotalTime:        time.Since(req.StartTime),
 		TimeToFirstToken: ttft,
 		ResponseContent:  responseContent,
 		ModelID:          modelMetadata.ModelID,
@@ -204,10 +198,6 @@ func (im *InferenceManager) QueryModels(c *setup.Context, req *shared.RequestInf
 			OutputCredits:   modelMetadata.OCPT,
 			CanceledCredits: modelMetadata.CRC,
 		},
-	}
-
-	if !req.Stream {
-		c.Log.Infow("Request timing breakdown", "total_time_ms", totalRequestTime.Milliseconds(), "discovery_ms", discoveryDuration.Milliseconds(), "kserve_request_ms", kserveRequestDuration.Milliseconds(), "model", req.Model, "endpoint", req.Endpoint)
 	}
 
 	return resInfo, nil

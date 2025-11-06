@@ -5,9 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"net"
 	"net/http"
-	"time"
 
 	"sybil-api/internal/buckets"
 	"sybil-api/internal/shared"
@@ -43,16 +41,17 @@ func NewInferenceManager(wdb *sql.DB, rdb *sql.DB, redisClient *redis.Client, lo
 		return nil, errors.New("failed ping to redis db")
 	}
 
-	tr := &http.Transport{
-		Dial: (&net.Dialer{
-			Timeout: 2 * time.Second,
-		}).Dial,
-		TLSHandshakeTimeout: 2 * time.Second,
-		DisableKeepAlives:   false,
-	}
+	// shared http client with connection pooling
 	httpClient := &http.Client{
-		Transport: tr,
-		Timeout:   shared.DefaultHTTPTimeout,
+		Timeout: shared.DefaultHTTPTimeout,
+		Transport: &http.Transport{
+			MaxIdleConns:        shared.DefaultMaxIdleConns,
+			MaxIdleConnsPerHost: shared.DefaultMaxIdleConnsPerHost,
+			IdleConnTimeout:     shared.DefaultIdleConnTimeout,
+			DisableKeepAlives:   false,
+			DisableCompression:  true,
+			MaxConnsPerHost:     shared.DefaultMaxConnsPerHost,
+		},
 	}
 
 	usageCache := buckets.NewUsageCache(log, wdb)
