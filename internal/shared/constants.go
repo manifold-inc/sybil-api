@@ -4,13 +4,9 @@ import "time"
 
 // HTTP Client Configuration
 const (
-	DefaultHTTPTimeout         = 180 * time.Second
-	DefaultMaxIdleConns        = 100
-	DefaultMaxIdleConnsPerHost = 10
-	DefaultIdleConnTimeout     = 90 * time.Second
-	DefaultMaxConnsPerHost     = 50
-	DefaultRequestTimeout      = 120 * time.Second
-	DefaultShutdownTimeout     = 10 * time.Minute
+	DefaultHTTPTimeout     = 180 * time.Second
+	DefaultRequestTimeout  = 120 * time.Second
+	DefaultShutdownTimeout = 10 * time.Minute
 )
 
 // Cache Configuration

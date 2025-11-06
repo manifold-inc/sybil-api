@@ -55,9 +55,6 @@ func (im *InferenceManager) preprocessOpenAIRequest(
 
 	modelName := model.(string)
 
-	// Log request start
-	c.Log.Infow("Request started")
-
 	if endpoint == shared.ENDPOINTS.EMBEDDING {
 
 		input, ok := payload["input"]
@@ -277,14 +274,6 @@ func (im *InferenceManager) ProcessOpenaiRequest(cc echo.Context, endpoint strin
 		if resInfo.Usage == nil {
 			resInfo.Usage = &shared.Usage{IsCanceled: resInfo.Canceled}
 		}
-
-		log.Infow(
-			"Request processing completed",
-			"time_to_first_token",
-			resInfo.TimeToFirstToken,
-			"total_time",
-			resInfo.TotalTime,
-		)
 
 		totalCredits := shared.CalculateCredits(resInfo.Usage, resInfo.Cost.InputCredits, resInfo.Cost.OutputCredits, resInfo.Cost.CanceledCredits)
 
