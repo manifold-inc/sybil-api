@@ -57,6 +57,10 @@ func (im *InferenceManager) QueryModels(c *setup.Context, req *shared.RequestInf
 	ctx, cancel := context.WithCancel(c.Request().Context())
 	timer := time.AfterFunc(shared.DefaultStreamRequestTimeout, func() {
 		if req.Stream {
+			c.Log.Warnw("Stream request timeout triggered",
+				"timeout_seconds", shared.DefaultStreamRequestTimeout.Seconds(),
+				"model", req.Model,
+				"user_id", req.UserID)
 			timeoutOccurred.Store(true)
 			cancel()
 		}
@@ -69,12 +73,16 @@ func (im *InferenceManager) QueryModels(c *setup.Context, req *shared.RequestInf
 
 	// Start Request
 	requestStart := time.Now()
+
+	// Check if client already disconnected before we start
+	if c.Request().Context().Err() != nil {
+		c.Log.Infow("Client already disconnected before HTTP request",
+			"context_error", c.Request().Context().Err())
+	}
+
 	res, err := im.HTTPClient.Do(r)
 	requestDuration := time.Since(requestStart)
-	c.Log.Infow("HTTP request completed",
-		"duration_ms", requestDuration.Milliseconds(),
-		"model_url", modelMetadata.URL,
-		"model", req.Model)
+
 	defer func() {
 		if res != nil && res.Body != nil {
 			if closeErr := res.Body.Close(); closeErr != nil {
@@ -82,12 +90,44 @@ func (im *InferenceManager) QueryModels(c *setup.Context, req *shared.RequestInf
 			}
 		}
 	}()
+
 	canceled := c.Request().Context().Err() == context.Canceled
 	modelLabel := fmt.Sprintf("%d-%s", modelMetadata.ModelID, req.Model)
+
+	// Log HTTP request completion with status
+	if err != nil {
+		c.Log.Errorw("HTTP request failed",
+			"duration_ms", requestDuration.Milliseconds(),
+			"model_url", modelMetadata.URL,
+			"model", req.Model,
+			"error", err.Error(),
+			"canceled", canceled,
+			"timeout_occurred", timeoutOccurred.Load())
+	} else if res != nil {
+		c.Log.Infow("HTTP request completed",
+			"duration_ms", requestDuration.Milliseconds(),
+			"model_url", modelMetadata.URL,
+			"model", req.Model,
+			"status_code", res.StatusCode,
+			"canceled", canceled)
+	}
+
+	// Handle timeout
 	if err != nil && timeoutOccurred.Load() {
 		c.Log.Warnw("Request timed out - likely due to model cold start", "model", req.Model, "user_id", req.UserID)
 		metrics.ErrorCount.WithLabelValues(modelLabel, req.Endpoint, fmt.Sprintf("%d", req.UserID), "cold_start").Inc()
 		return nil, &shared.RequestError{StatusCode: 503, Err: errors.New("cold start detected, please try again in a few minutes")}
+	}
+
+	// Handle client cancellation
+	if canceled {
+		c.Log.Infow("Request canceled by client",
+			"model", req.Model,
+			"user_id", req.UserID,
+			"duration_ms", requestDuration.Milliseconds(),
+			"had_error", err != nil)
+		metrics.ErrorCount.WithLabelValues(modelLabel, req.Endpoint, fmt.Sprintf("%d", req.UserID), "client_canceled").Inc()
+		// Don't return error, let it process gracefully
 	}
 
 	if err != nil && !canceled {
@@ -111,11 +151,12 @@ func (im *InferenceManager) QueryModels(c *setup.Context, req *shared.RequestInf
 	if req.Stream && !canceled { // Check if the request is streaming
 		c.Response().Header().Set("Content-Type", "text/event-stream")
 		reader := bufio.NewScanner(res.Body)
+		c.Log.Infow("Starting streaming loop", "model", req.Model)
 	scanner:
 		for reader.Scan() {
 			select {
 			case <-ctx.Done():
-				c.Log.Warnw("Request canceled by client")
+				c.Log.Warnw("Request canceled by client during streaming")
 				break scanner
 			default:
 				token := reader.Text()
@@ -159,14 +200,32 @@ func (im *InferenceManager) QueryModels(c *setup.Context, req *shared.RequestInf
 				responses = append(responses, rawMessage)
 			}
 		}
+
+		// Log why the scanner loop exited
+		c.Log.Infow("Streaming loop exited",
+			"responses_received", len(responses),
+			"ttft_recorded", ttftRecorded,
+			"has_done", hasDone,
+			"ctx_error", ctx.Err(),
+			"scanner_error", reader.Err())
+
 		// Always collect response content since saving decision is made in ProcessOpenaiRequest
 		responseJSON, err := json.Marshal(responses)
 		if err == nil {
 			responseContent = string(responseJSON)
 		}
 		if !hasDone && ctx.Err() == nil {
-			c.Log.Errorw("encountered streaming error", "error", errors.New("[DONE] not found"))
+			c.Log.Errorw("encountered streaming error",
+				"error", errors.New("[DONE] not found"),
+				"responses_received", len(responses),
+				"ttft_recorded", ttftRecorded)
 			metrics.ErrorCount.WithLabelValues(modelLabel, req.Endpoint, fmt.Sprintf("%d", req.UserID), "streaming_no_done").Inc()
+		}
+		if !hasDone && ctx.Err() != nil {
+			c.Log.Warnw("streaming incomplete due to context cancellation",
+				"context_error", ctx.Err(),
+				"responses_received", len(responses),
+				"ttft_recorded", ttftRecorded)
 		}
 		if err := reader.Err(); err != nil && !errors.Is(err, context.Canceled) {
 			c.Log.Errorw("encountered streaming error", "error", err)
@@ -217,6 +276,15 @@ func (im *InferenceManager) QueryModels(c *setup.Context, req *shared.RequestInf
 			CanceledCredits: modelMetadata.CRC,
 		},
 	}
+
+	// Log final request state
+	c.Log.Infow("QueryModels completed",
+		"canceled", resInfo.Canceled,
+		"completed", resInfo.Completed,
+		"stream", req.Stream,
+		"ttft_ms", ttft.Milliseconds(),
+		"total_time_ms", resInfo.TotalTime.Milliseconds(),
+		"response_length", len(responseContent))
 
 	return resInfo, nil
 }

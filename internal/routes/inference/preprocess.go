@@ -193,7 +193,11 @@ func (im *InferenceManager) ProcessOpenaiRequest(cc echo.Context, endpoint strin
 
 	resInfo, qerr := im.QueryModels(c, reqInfo)
 	if qerr != nil {
-		c.Log.Warnw("failed request", "error", qerr.Error())
+		c.Log.Warnw("failed request",
+			"error", qerr.Error(),
+			"status_code", qerr.StatusCode,
+			"model", reqInfo.Model,
+			"endpoint", reqInfo.Endpoint)
 
 		/* TODO: Revisit overload logic
 		if qerr.StatusCode == 502 {
@@ -214,6 +218,13 @@ func (im *InferenceManager) ProcessOpenaiRequest(cc echo.Context, endpoint strin
 
 	// Extract usage data from the response content
 	if resInfo.ResponseContent == "" || !resInfo.Completed {
+		c.Log.Errorw("No response or incomplete response from model",
+			"response_content_length", len(resInfo.ResponseContent),
+			"completed", resInfo.Completed,
+			"canceled", resInfo.Canceled,
+			"model", reqInfo.Model,
+			"ttft", resInfo.TimeToFirstToken,
+			"total_time", resInfo.TotalTime)
 		_ = c.JSON(500, shared.OpenAIError{
 			Message: "no response from model",
 			Object:  "error",
