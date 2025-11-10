@@ -19,12 +19,12 @@ type InferenceService struct {
 }
 
 func (im *InferenceManager) DiscoverModels(ctx context.Context, userID uint64, modelName string) (*InferenceService, error) {
-	cacheKey := fmt.Sprintf("sybil:v1:model:service:%s", modelName)
+	cacheKey := fmt.Sprintf("sybil:v1:model:service:%d:%s", userID, modelName)
 	cached, err := im.RedisClient.Get(ctx, cacheKey).Result()
 	if err == nil && cached != "" {
 		var serviceCache map[string]any
 		if err := json.Unmarshal([]byte(cached), &serviceCache); err == nil {
-			im.Log.Debugw("Cache hit for model service", "model_name", modelName)
+			im.Log.Debugw("Cache hit for model service", "model_name", modelName, "user_id", userID)
 
 			// parse cached data
 			service := &InferenceService{
@@ -36,23 +36,10 @@ func (im *InferenceManager) DiscoverModels(ctx context.Context, userID uint64, m
 				Modality: serviceCache["modality"].(string),
 			}
 
-			// check permissions for private models (indicated by non-null allowed_user_id)
-			if allowedUserIDFloat, ok := serviceCache["allowed_user_id"].(float64); ok && allowedUserIDFloat > 0 {
-				// This is a private model with a specific allowed user
-				allowedUserID := uint64(allowedUserIDFloat)
-				if allowedUserID != userID {
-					im.Log.Warnw("Access denied to private model (from cache)",
-						"model_name", modelName,
-						"user_id", userID,
-						"allowed_user_id", allowedUserID)
-					return nil, fmt.Errorf("access denied: model is private")
-				}
-			}
-			// If allowed_user_id is null/missing/0, it's a public model - allow access
-
 			im.Log.Debugw("Model service retrieved from cache",
 				"model_name", modelName,
-				"model_id", service.ModelID)
+				"model_id", service.ModelID,
+				"user_id", userID)
 			return service, nil
 		}
 		im.Log.Warnw("Failed to unmarshal cached model service", "error", err, "model_name", modelName)
@@ -115,13 +102,12 @@ func (im *InferenceManager) DiscoverModels(ctx context.Context, userID uint64, m
 		defer cancel()
 
 		serviceCache := map[string]any{
-			"model_id":        service.ModelID,
-			"url":             service.URL,
-			"icpt":            service.ICPT,
-			"ocpt":            service.OCPT,
-			"crc":             service.CRC,
-			"modality":        service.Modality,
-			"allowed_user_id": allowedUserID,
+			"model_id": service.ModelID,
+			"url":      service.URL,
+			"icpt":     service.ICPT,
+			"ocpt":     service.OCPT,
+			"crc":      service.CRC,
+			"modality": service.Modality,
 		}
 		cacheJSON, err := json.Marshal(serviceCache)
 		if err != nil {
