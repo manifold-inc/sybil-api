@@ -25,9 +25,8 @@ func (im *InferenceManager) CompletionRequest(c echo.Context) error {
 	return err
 }
 
-// CompletionRequestHistory processes a completion request and returns the response content for history saving
 func (im *InferenceManager) CompletionRequestHistory(c echo.Context) (string, error) {
-	return im.ProcessOpenaiRequest(c, shared.ENDPOINTS.COMPLETION)
+	return im.ProcessOpenaiRequest(c, shared.ENDPOINTS.CHAT)
 }
 
 func (im *InferenceManager) EmbeddingRequest(c echo.Context) error {

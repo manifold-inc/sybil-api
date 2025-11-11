@@ -60,7 +60,23 @@ func (im *InferenceManager) CompletionRequestNewHistory(cc echo.Context) error {
 	c.Request().Body = io.NopCloser(strings.NewReader(string(body)))
 
 	responseContent, err := im.CompletionRequestHistory(c)
+
+	statusCode := c.Response().Status
+	if statusCode >= 400 {
+		c.Log.Warnw("Not saving history due to error status code", "status_code", statusCode)
+		if c.Response().Committed {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		return nil
+	}
+
 	if err != nil {
+		if c.Response().Committed {
+			return nil
+		}
 		return err
 	}
 
@@ -82,7 +98,19 @@ func (im *InferenceManager) CompletionRequestNewHistory(cc echo.Context) error {
 		return nil
 	}
 
-	go func(userID uint64, messagesJSON []byte, log *zap.SugaredLogger) {
+	var title *string
+	for _, msg := range messages {
+		if msg.Role == "user" && msg.Content != "" {
+			titleStr := msg.Content
+			if len(titleStr) > 32 {
+				titleStr = titleStr[:32]
+			}
+			title = &titleStr
+			break
+		}
+	}
+
+	go func(userID uint64, messagesJSON []byte, title *string, log *zap.SugaredLogger) {
 		insertQuery := `
 			INSERT INTO chat_history (
 				user_id,
@@ -95,8 +123,8 @@ func (im *InferenceManager) CompletionRequestNewHistory(cc echo.Context) error {
 		result, err := im.WDB.Exec(insertQuery,
 			userID,
 			string(messagesJSON),
-			nil, // title
-			nil, // icon
+			title,
+			nil,   // icon
 		)
 		if err != nil {
 			log.Errorw("Failed to insert history into database", "error", err)
@@ -110,7 +138,7 @@ func (im *InferenceManager) CompletionRequestNewHistory(cc echo.Context) error {
 		}
 
 		log.Infow("Chat history created", "history_id", historyID, "user_id", userID)
-	}(c.User.UserID, messagesJSON, c.Log)
+	}(c.User.UserID, messagesJSON, title, c.Log)
 
 	return nil
 }
