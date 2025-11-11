@@ -68,20 +68,11 @@ func (im *InferenceManager) Models(cc echo.Context) error {
 	ctx, cancel := context.WithTimeout(c.Request().Context(), 5*time.Second)
 	defer cancel()
 
-	c.Log.Infow("Fetching models", "user_id", func() uint64 {
-		if c.User != nil {
-			return c.User.UserID
-		}
-		return 0
-	}())
-
 	models, err := fetchModels(ctx, im.RDB, c.User, c)
 	if err != nil {
 		c.Log.Errorw("Failed to get models", "error", err.Error())
 		return cc.String(500, "Failed to get models")
 	}
-
-	c.Log.Infow("Models fetched successfully", "count", len(models))
 
 	return c.JSON(200, ModelList{
 		Data: models,
@@ -93,7 +84,6 @@ func fetchModels(ctx context.Context, db *sql.DB, user *shared.UserMetadata, c *
 		`
 	switch true {
 	case user != nil:
-		c.Log.Infow("Querying user-specific models", "user_id", user.UserID)
 		if models, err := queryModels(ctx, db, c, baseQuery+`
 				SELECT name, DATE_FORMAT(created_at, '%Y-%m-%d %H:%i:%s') as created,
 					icpt, ocpt, crc, metadata, modality, supported_endpoints
@@ -101,17 +91,13 @@ func fetchModels(ctx context.Context, db *sql.DB, user *shared.UserMetadata, c *
 				WHERE enabled = true AND allowed_user_id = ?
 				ORDER BY name ASC`,
 			user.UserID); err == nil && len(models) > 0 {
-			c.Log.Infow("Found user-specific models", "count", len(models))
 			return models, nil
 		} else if err != nil {
 			c.Log.Warnw("Error querying user-specific models, falling back to public", "error", err.Error())
-		} else {
-			c.Log.Infow("No user-specific models found, falling back to public")
 		}
 		fallthrough
 	default:
 		// public models
-		c.Log.Infow("Querying public models")
 		return queryModels(ctx, db, c, `
 			SELECT name, DATE_FORMAT(created_at, '%Y-%m-%d %H:%i:%s') as created,
 				icpt, ocpt, crc, metadata, modality, supported_endpoints
@@ -129,12 +115,10 @@ func queryModels(ctx context.Context, db *sql.DB, c *setup.Context, query string
 	defer rows.Close()
 
 	var models []Model
-	rowCount := 0
 	for rows.Next() {
-		rowCount++
 		model, err := scanModel(rows)
 		if err != nil {
-			c.Log.Warnw("Failed to scan model row", "row", rowCount, "error", err.Error())
+			c.Log.Warnw("Failed to scan model row", "error", err.Error())
 			continue
 		}
 		models = append(models, model)
@@ -145,7 +129,6 @@ func queryModels(ctx context.Context, db *sql.DB, c *setup.Context, query string
 		return nil, err
 	}
 
-	c.Log.Infow("Query complete", "rows_scanned", rowCount, "models_added", len(models))
 	return models, nil
 }
 

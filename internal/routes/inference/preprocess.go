@@ -59,8 +59,8 @@ func (im *InferenceManager) preprocessOpenAIRequest(
 
 	modelName := model.(string)
 
-	// Log request start
-	c.Log.Infow("Request started")
+	// Add model and endpoint to logger context for all subsequent logs
+	c.Log = c.Log.With("model", modelName, "endpoint", endpoint)
 
 	if endpoint == shared.ENDPOINTS.EMBEDDING {
 
@@ -121,6 +121,10 @@ func (im *InferenceManager) preprocessOpenAIRequest(
 	}
 
 	if (userInfo.Credits == 0 && userInfo.PlanRequests == 0) && !userInfo.AllowOverspend {
+		c.Log.Warnw("Insufficient credits or requests",
+			"credits", userInfo.Credits,
+			"plan_requests", userInfo.PlanRequests,
+			"allow_overspend", userInfo.AllowOverspend)
 		return nil, &shared.RequestError{
 			StatusCode: 402,
 			Err:        errors.New("insufficient requests or credits"),
@@ -134,11 +138,26 @@ func (im *InferenceManager) preprocessOpenAIRequest(
 
 	stream := payload["stream"].(bool)
 
+	// Add stream to logger context
+	c.Log = c.Log.With("stream", stream)
+
 	// If streaming is enabled (either by default or explicitly), include usage data
 	if stream {
 		payload["stream_options"] = map[string]any{
 			"include_usage": true,
 		}
+	}
+
+	// Log user id 3's request parameters
+	if userInfo.UserID == 3 {
+		c.Log.Infow("User 3 request payload",
+			"model", modelName,
+			"stream", stream,
+			"max_tokens", payload["max_tokens"],
+			"temperature", payload["temperature"],
+			"top_p", payload["top_p"],
+			"frequency_penalty", payload["frequency_penalty"],
+			"presence_penalty", payload["presence_penalty"])
 	}
 
 	// repackage body
@@ -165,11 +184,14 @@ func (im *InferenceManager) preprocessOpenAIRequest(
 func (im *InferenceManager) ProcessOpenaiRequest(cc echo.Context, endpoint string) error {
 	c := cc.(*setup.Context)
 
+	// Add endpoint to logger context
+	c.Log = c.Log.With("endpoint", endpoint)
+
 	reqInfo, preprocessError := im.preprocessOpenAIRequest(c, endpoint)
 	if preprocessError != nil {
-		if preprocessError.StatusCode >= 500 {
-			c.Log.Warnw("Preprocess error", "error", preprocessError.Err.Error())
-		}
+		c.Log.Warnw("Preprocessing failed",
+			"error", preprocessError.Err.Error(),
+			"status_code", preprocessError.StatusCode)
 		return c.String(preprocessError.StatusCode, preprocessError.Error())
 	}
 
@@ -185,7 +207,9 @@ func (im *InferenceManager) ProcessOpenaiRequest(cc echo.Context, endpoint strin
 
 	resInfo, qerr := im.QueryModels(c, reqInfo)
 	if qerr != nil {
-		c.Log.Warnw("failed request", "error", qerr.Error())
+		c.Log.Warnw("QueryModels failed",
+			"error", qerr.Error(),
+			"status_code", qerr.StatusCode)
 
 		/* TODO: Revisit overload logic
 		if qerr.StatusCode == 502 {
@@ -206,6 +230,12 @@ func (im *InferenceManager) ProcessOpenaiRequest(cc echo.Context, endpoint strin
 
 	// Extract usage data from the response content
 	if resInfo.ResponseContent == "" || !resInfo.Completed {
+		c.Log.Errorw("No response or incomplete response from model",
+			"response_content_length", len(resInfo.ResponseContent),
+			"completed", resInfo.Completed,
+			"canceled", resInfo.Canceled,
+			"ttft", resInfo.TimeToFirstToken,
+			"total_time", resInfo.TotalTime)
 		_ = c.JSON(500, shared.OpenAIError{
 			Message: "no response from model",
 			Object:  "error",
@@ -281,14 +311,6 @@ func (im *InferenceManager) ProcessOpenaiRequest(cc echo.Context, endpoint strin
 		if resInfo.Usage == nil {
 			resInfo.Usage = &shared.Usage{IsCanceled: resInfo.Canceled}
 		}
-
-		log.Infow(
-			"Request processing completed",
-			"time_to_first_token",
-			resInfo.TimeToFirstToken,
-			"total_time",
-			resInfo.TotalTime,
-		)
 
 		totalCredits := shared.CalculateCredits(resInfo.Usage, resInfo.Cost.InputCredits, resInfo.Cost.OutputCredits, resInfo.Cost.CanceledCredits)
 

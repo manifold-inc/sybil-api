@@ -44,11 +44,11 @@ type CreateModelRequest struct {
 }
 
 type ScalingConfig struct {
-	ScaleToZeroGracePeriod string            `json:"scale_to_zero_grace_period,omitempty"`
-	ScaleUpDelay           string            `json:"scale_up_delay,omitempty"`
-	ScaleDownDelay         string            `json:"scale_down_delay,omitempty"`
-	TargetConcurrency      *int64            `json:"target_concurrency,omitempty"`
-	CustomAnnotations      map[string]string `json:"custom_annotations,omitempty"`
+	ScaleToZeroGracePeriod string            `json:"scaleToZeroGracePeriod,omitempty"`
+	ScaleUpDelay           string            `json:"scaleUpDelay,omitempty"`
+	ScaleDownDelay         string            `json:"scaleDownDelay,omitempty"`
+	TargetConcurrency      *int64            `json:"targetConcurrency,omitempty"`
+	CustomAnnotations      map[string]string `json:"customAnnotations,omitempty"`
 }
 
 type Pricing struct {

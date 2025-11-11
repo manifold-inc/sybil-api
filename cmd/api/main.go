@@ -41,6 +41,7 @@ func main() {
 			logger := core.Log.With(
 				"request_id", "req_"+reqID,
 			)
+			logger = logger.With("externalid", c.Request().Header.Get("X-Dippy-Request-Id"))
 
 			cc := &setup.Context{Context: c, Log: logger, Reqid: reqID}
 			start := time.Now()
