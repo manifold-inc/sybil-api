@@ -21,8 +21,6 @@ import (
 
 // QueryModels forwards the request to the appropriate model
 func (im *InferenceManager) QueryModels(c *setup.Context, req *shared.RequestInfo) (*shared.ResponseInfo, *shared.RequestError) {
-	c.Log.Infow("QueryModels started")
-
 	// Discover inference service
 	modelMetadata, err := im.DiscoverModels(c.Request().Context(), req.UserID, req.Model)
 	if err != nil {
@@ -35,7 +33,6 @@ func (im *InferenceManager) QueryModels(c *setup.Context, req *shared.RequestInf
 
 	// Add model metadata to logger context for all subsequent logs
 	c.Log = c.Log.With("model_id", modelMetadata.ModelID, "model_url", modelMetadata.URL)
-	c.Log.Infow("Model discovered")
 
 	// Initialize http request
 	route := shared.ROUTES[req.Endpoint]
@@ -60,7 +57,7 @@ func (im *InferenceManager) QueryModels(c *setup.Context, req *shared.RequestInf
 	}
 	// Handle cold starts - models scaling from 0 can take time to load
 	var timeoutOccurred atomic.Bool
-	ctx, cancel := context.WithCancel(c.Request().Context())
+	ctx, cancel := context.WithTimeout(context.Background(), shared.DefaultStreamRequestTimeout)
 	timer := time.AfterFunc(shared.DefaultStreamRequestTimeout, func() {
 		if req.Stream {
 			c.Log.Warnw("Stream request timeout triggered",
@@ -77,21 +74,16 @@ func (im *InferenceManager) QueryModels(c *setup.Context, req *shared.RequestInf
 	}()
 	r = r.WithContext(ctx)
 
-	// Track timing breakdown
 	preprocessingTime := time.Since(req.StartTime)
 	httpStart := time.Now()
 
-	// Check if client already disconnected before we start
 	if c.Request().Context().Err() != nil {
 		c.Log.Warnw("Client already disconnected before HTTP request",
 			"context_error", c.Request().Context().Err())
 	}
 
-	c.Log.Infow("Starting HTTP request to model",
-		"timeout_seconds", shared.DefaultStreamRequestTimeout.Seconds(),
-		"preprocessing_ms", preprocessingTime.Milliseconds())
-
-	res, err := im.HTTPClient.Do(r)
+	httpClient := im.getHTTPClient(modelMetadata.URL)
+	res, err := httpClient.Do(r)
 	httpDuration := time.Since(httpStart)
 	httpCompletedAt := time.Now()
 
@@ -106,30 +98,20 @@ func (im *InferenceManager) QueryModels(c *setup.Context, req *shared.RequestInf
 	canceled := c.Request().Context().Err() == context.Canceled
 	modelLabel := fmt.Sprintf("%d-%s", modelMetadata.ModelID, req.Model)
 
-	// Log HTTP request completion with status
 	if err != nil {
 		c.Log.Errorw("HTTP request failed",
 			"http_duration_ms", httpDuration.Milliseconds(),
-			"elapsed_since_start_ms", time.Since(req.StartTime).Milliseconds(),
 			"error", err.Error(),
 			"canceled", canceled,
 			"timeout_occurred", timeoutOccurred.Load())
-	} else if res != nil {
-		c.Log.Infow("HTTP request completed",
-			"http_duration_ms", httpDuration.Milliseconds(),
-			"elapsed_since_start_ms", time.Since(req.StartTime).Milliseconds(),
-			"status_code", res.StatusCode,
-			"canceled", canceled)
 	}
 
-	// Handle timeout
 	if err != nil && timeoutOccurred.Load() {
 		c.Log.Warnw("Request timed out - likely due to model cold start")
 		metrics.ErrorCount.WithLabelValues(modelLabel, req.Endpoint, fmt.Sprintf("%d", req.UserID), "cold_start").Inc()
 		return nil, &shared.RequestError{StatusCode: 503, Err: errors.New("cold start detected, please try again in a few minutes")}
 	}
 
-	// Handle client cancellation
 	if canceled {
 		c.Log.Warnw("Request canceled by client",
 			"http_duration_ms", httpDuration.Milliseconds(),
@@ -166,25 +148,22 @@ func (im *InferenceManager) QueryModels(c *setup.Context, req *shared.RequestInf
 	var ttftRecorded bool
 	hasDone := false
 
-	c.Log.Infow("Deciding response handling path",
-		"canceled", canceled,
-		"will_stream", req.Stream && !canceled,
-		"will_non_stream", !req.Stream && !canceled)
-
 	if req.Stream && !canceled { // Check if the request is streaming
 		c.Response().Header().Set("Content-Type", "text/event-stream")
 		reader := bufio.NewScanner(res.Body)
-		streamStartTime := time.Now()
-		c.Log.Infow("Starting streaming loop",
-			"http_duration_ms", httpDuration.Milliseconds(),
-			"elapsed_since_start_ms", time.Since(req.StartTime).Milliseconds(),
-			"status_code", res.StatusCode)
+
+		clientDisconnected := false
 	scanner:
 		for reader.Scan() {
 			select {
 			case <-ctx.Done():
-				c.Log.Warnw("Request canceled by client during streaming")
+				c.Log.Warnw("Inference engine request timeout during streaming")
 				break scanner
+			case <-c.Request().Context().Done():
+				if !clientDisconnected {
+					c.Log.Warnw("Client disconnected during streaming, continuing to read from inference engine")
+					clientDisconnected = true
+				}
 			default:
 				token := reader.Text()
 
@@ -193,8 +172,11 @@ func (im *InferenceManager) QueryModels(c *setup.Context, req *shared.RequestInf
 					continue
 				}
 
-				_, _ = fmt.Fprint(c.Response(), token+"\n\n")
-				c.Response().Flush()
+				// Only write to client if they're still connected
+				if c.Request().Context().Err() == nil {
+					_, _ = fmt.Fprint(c.Response(), token+"\n\n")
+					c.Response().Flush()
+				}
 
 				if !strings.HasPrefix(token, "data: ") {
 					c.Log.Warnw("non data response", "text", token)
@@ -229,22 +211,6 @@ func (im *InferenceManager) QueryModels(c *setup.Context, req *shared.RequestInf
 			}
 		}
 
-		// Log why the scanner loop exited
-		streamDuration := time.Since(streamStartTime)
-		c.Log.Infow("Streaming loop exited",
-			"responses_received", len(responses),
-			"ttft_recorded", ttftRecorded,
-			"has_done", hasDone,
-			"stream_duration_ms", streamDuration.Milliseconds(),
-			"time_waiting_for_first_token_ms", func() int64 {
-				if ttftRecorded {
-					return time.Since(httpCompletedAt).Milliseconds() - streamDuration.Milliseconds()
-				}
-				return streamDuration.Milliseconds()
-			}(),
-			"ctx_error", ctx.Err(),
-			"scanner_error", reader.Err())
-
 		// Always collect response content since saving decision is made in ProcessOpenaiRequest
 		responseJSON, err := json.Marshal(responses)
 		if err == nil {
@@ -275,7 +241,6 @@ func (im *InferenceManager) QueryModels(c *setup.Context, req *shared.RequestInf
 	}
 
 	if !req.Stream && !canceled { // Handle non-streaming response
-		c.Log.Infow("Processing non-streaming response", "status_code", res.StatusCode)
 		bodyBytes, err := io.ReadAll(res.Body)
 		hasDone = true
 		if err != nil {
@@ -297,13 +262,6 @@ func (im *InferenceManager) QueryModels(c *setup.Context, req *shared.RequestInf
 
 		// Calculate timing breakdown
 		ttft = time.Since(req.StartTime)
-		modelProcessingTime := time.Since(httpCompletedAt)
-		c.Log.Infow("Non-streaming response completed",
-			"ttft_ms", ttft.Milliseconds(),
-			"preprocessing_ms", preprocessingTime.Milliseconds(),
-			"http_duration_ms", httpDuration.Milliseconds(),
-			"model_processing_ms", modelProcessingTime.Milliseconds(),
-			"response_size", len(bodyBytes))
 	}
 
 	resInfo := &shared.ResponseInfo{
@@ -321,12 +279,11 @@ func (im *InferenceManager) QueryModels(c *setup.Context, req *shared.RequestInf
 	}
 
 	// Log final request state
-	c.Log.Infow("QueryModels completed",
-		"canceled", resInfo.Canceled,
+	c.Log.Infow("Request completed",
 		"completed", resInfo.Completed,
+		"canceled", resInfo.Canceled,
 		"ttft_ms", ttft.Milliseconds(),
-		"total_time_ms", resInfo.TotalTime.Milliseconds(),
-		"response_length", len(responseContent))
+		"total_ms", resInfo.TotalTime.Milliseconds())
 
 	return resInfo, nil
 }

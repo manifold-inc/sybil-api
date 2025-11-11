@@ -58,9 +58,6 @@ func (im *InferenceManager) preprocessOpenAIRequest(
 	// Add model and endpoint to logger context for all subsequent logs
 	c.Log = c.Log.With("model", modelName, "endpoint", endpoint)
 
-	// Log request start
-	c.Log.Infow("Request started")
-
 	if endpoint == shared.ENDPOINTS.EMBEDDING {
 
 		input, ok := payload["input"]
@@ -131,18 +128,14 @@ func (im *InferenceManager) preprocessOpenAIRequest(
 	}
 
 	// Set stream default if not specified
-	streamWasSet := true
 	if val, ok := payload["stream"]; !ok || val == nil {
 		payload["stream"] = shared.DefaultStreamOption
-		streamWasSet = false
 	}
 
 	stream := payload["stream"].(bool)
 
 	// Add stream to logger context
 	c.Log = c.Log.With("stream", stream)
-
-	c.Log.Infow("Stream configuration", "stream_explicitly_set", streamWasSet)
 
 	// If streaming is enabled (either by default or explicitly), include usage data
 	if stream {
@@ -181,8 +174,6 @@ func (im *InferenceManager) preprocessOpenAIRequest(
 		Stream:    stream,
 	}
 
-	c.Log.Infow("Request preprocessing completed successfully", "body_size", len(body))
-
 	return reqInfo, nil
 }
 
@@ -191,7 +182,6 @@ func (im *InferenceManager) ProcessOpenaiRequest(cc echo.Context, endpoint strin
 
 	// Add endpoint to logger context
 	c.Log = c.Log.With("endpoint", endpoint)
-	c.Log.Infow("ProcessOpenaiRequest started")
 
 	reqInfo, preprocessError := im.preprocessOpenAIRequest(c, endpoint)
 	if preprocessError != nil {
@@ -200,8 +190,6 @@ func (im *InferenceManager) ProcessOpenaiRequest(cc echo.Context, endpoint strin
 			"status_code", preprocessError.StatusCode)
 		return c.String(preprocessError.StatusCode, preprocessError.Error())
 	}
-
-	c.Log.Infow("Preprocessing succeeded, calling QueryModels")
 
 	im.usageCache.AddInFlightToBucket(reqInfo.UserID)
 
@@ -236,13 +224,6 @@ func (im *InferenceManager) ProcessOpenaiRequest(cc echo.Context, endpoint strin
 		})
 	}
 
-	c.Log.Infow("QueryModels succeeded",
-		"completed", resInfo.Completed,
-		"canceled", resInfo.Canceled,
-		"response_length", len(resInfo.ResponseContent),
-		"ttft_ms", resInfo.TimeToFirstToken.Milliseconds(),
-		"total_time_ms", resInfo.TotalTime.Milliseconds())
-
 	// Extract usage data from the response content
 	if resInfo.ResponseContent == "" || !resInfo.Completed {
 		c.Log.Errorw("No response or incomplete response from model",
@@ -260,7 +241,6 @@ func (im *InferenceManager) ProcessOpenaiRequest(cc echo.Context, endpoint strin
 	}
 
 	// Asynchronously process request and return to the user
-	c.Log.Infow("Starting async processing for usage extraction and billing", "completed", resInfo.Completed)
 	log := c.Log
 	go func() {
 		switch true {
@@ -327,14 +307,6 @@ func (im *InferenceManager) ProcessOpenaiRequest(cc echo.Context, endpoint strin
 		if resInfo.Usage == nil {
 			resInfo.Usage = &shared.Usage{IsCanceled: resInfo.Canceled}
 		}
-
-		log.Infow(
-			"Request processing completed",
-			"time_to_first_token",
-			resInfo.TimeToFirstToken,
-			"total_time",
-			resInfo.TotalTime,
-		)
 
 		totalCredits := shared.CalculateCredits(resInfo.Usage, resInfo.Cost.InputCredits, resInfo.Cost.OutputCredits, resInfo.Cost.CanceledCredits)
 
