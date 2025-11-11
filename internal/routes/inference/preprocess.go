@@ -16,15 +16,23 @@ import (
 )
 
 func (im *InferenceManager) ChatRequest(c echo.Context) error {
-	return im.ProcessOpenaiRequest(c, shared.ENDPOINTS.CHAT)
+	_, err := im.ProcessOpenaiRequest(c, shared.ENDPOINTS.CHAT)
+	return err
 }
 
 func (im *InferenceManager) CompletionRequest(c echo.Context) error {
+	_, err := im.ProcessOpenaiRequest(c, shared.ENDPOINTS.COMPLETION)
+	return err
+}
+
+// CompletionRequestHistory processes a completion request and returns the response content for history saving
+func (im *InferenceManager) CompletionRequestHistory(c echo.Context) (string, error) {
 	return im.ProcessOpenaiRequest(c, shared.ENDPOINTS.COMPLETION)
 }
 
 func (im *InferenceManager) EmbeddingRequest(c echo.Context) error {
-	return im.ProcessOpenaiRequest(c, shared.ENDPOINTS.EMBEDDING)
+	_, err := im.ProcessOpenaiRequest(c, shared.ENDPOINTS.EMBEDDING)
+	return err
 }
 
 func (im *InferenceManager) preprocessOpenAIRequest(
@@ -177,7 +185,7 @@ func (im *InferenceManager) preprocessOpenAIRequest(
 	return reqInfo, nil
 }
 
-func (im *InferenceManager) ProcessOpenaiRequest(cc echo.Context, endpoint string) error {
+func (im *InferenceManager) ProcessOpenaiRequest(cc echo.Context, endpoint string) (string, error) {
 	c := cc.(*setup.Context)
 
 	// Add endpoint to logger context
@@ -185,10 +193,10 @@ func (im *InferenceManager) ProcessOpenaiRequest(cc echo.Context, endpoint strin
 
 	reqInfo, preprocessError := im.preprocessOpenAIRequest(c, endpoint)
 	if preprocessError != nil {
-		c.Log.Warnw("Preprocessing failed",
-			"error", preprocessError.Err.Error(),
-			"status_code", preprocessError.StatusCode)
-		return c.String(preprocessError.StatusCode, preprocessError.Error())
+		if preprocessError.StatusCode >= 500 {
+			c.Log.Warnw("Preprocess error", "error", preprocessError.Err.Error())
+		}
+		return "", c.String(preprocessError.StatusCode, preprocessError.Error())
 	}
 
 	im.usageCache.AddInFlightToBucket(reqInfo.UserID)
@@ -216,7 +224,7 @@ func (im *InferenceManager) ProcessOpenaiRequest(cc echo.Context, endpoint strin
 			)
 		} */
 
-		return c.JSON(qerr.StatusCode, shared.OpenAIError{
+		return "", c.JSON(qerr.StatusCode, shared.OpenAIError{
 			Message: qerr.Error(),
 			Object:  "error",
 			Type:    "InternalError",
@@ -238,6 +246,7 @@ func (im *InferenceManager) ProcessOpenaiRequest(cc echo.Context, endpoint strin
 			Type:    "InternalError",
 			Code:    500,
 		})
+		return "", nil
 	}
 
 	// Asynchronously process request and return to the user
@@ -340,7 +349,7 @@ func (im *InferenceManager) ProcessOpenaiRequest(cc echo.Context, endpoint strin
 		mu.Unlock()
 	}()
 
-	return nil
+	return resInfo.ResponseContent, nil
 }
 
 // Helper function to safely extract float64 values from a map

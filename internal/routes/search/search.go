@@ -110,7 +110,8 @@ func (s *SearchManager) Search(cc echo.Context) error {
 
 	c.Request().Body = io.NopCloser(bytes.NewReader(bodyJSON))
 
-	if err := s.QueryInference(c, shared.ENDPOINTS.CHAT); err != nil {
+	_, err = s.QueryInference(c, shared.ENDPOINTS.CHAT)
+	if err != nil {
 		c.Log.Errorw("Failed to query inference", "error", err)
 		return c.String(http.StatusInternalServerError, "inference failed")
 	}
