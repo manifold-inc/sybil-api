@@ -84,7 +84,7 @@ func (im *InferenceManager) CompletionRequestNewHistory(cc echo.Context) error {
 
 	go func(userID uint64, messagesJSON []byte, log *zap.SugaredLogger) {
 		insertQuery := `
-			INSERT INTO history (
+			INSERT INTO chat_history (
 				user_id,
 				messages,
 				title,
@@ -125,7 +125,7 @@ func (im *InferenceManager) UpdateHistory(cc echo.Context) error {
 	}
 
 	var userID uint64
-	checkQuery := `SELECT user_id FROM history WHERE id = ?`
+	checkQuery := `SELECT user_id FROM chat_history WHERE id = ?`
 	err = im.RDB.QueryRowContext(c.Request().Context(), checkQuery, historyID).Scan(&userID)
 	if err != nil {
 		if err == sql.ErrNoRows {
@@ -196,7 +196,7 @@ func (im *InferenceManager) UpdateHistory(cc echo.Context) error {
 	args = append(args, historyID)
 
 	updateQuery := fmt.Sprintf(`
-		UPDATE history 
+		UPDATE chat_history 
 		SET %s
 		WHERE id = ?
 	`, strings.Join(setFields, ", "))
