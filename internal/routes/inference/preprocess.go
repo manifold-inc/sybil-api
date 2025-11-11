@@ -27,6 +27,10 @@ func (im *InferenceManager) EmbeddingRequest(c echo.Context) error {
 	return im.ProcessOpenaiRequest(c, shared.ENDPOINTS.EMBEDDING)
 }
 
+func (im *InferenceManager) ResponsesRequest(c echo.Context) error {
+	return im.ProcessOpenaiRequest(c, shared.ENDPOINTS.RESPONSES)
+}
+
 func (im *InferenceManager) preprocessOpenAIRequest(
 	c *setup.Context,
 	endpoint string,

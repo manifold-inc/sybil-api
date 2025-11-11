@@ -81,6 +81,7 @@ func main() {
 	inferenceGroup.POST("/chat/completions", inferenceManager.ChatRequest)
 	inferenceGroup.POST("/completions", inferenceManager.CompletionRequest)
 	inferenceGroup.POST("/embeddings", inferenceManager.EmbeddingRequest)
+	inferenceGroup.POST("/responses", inferenceManager.ResponsesRequest)
 
 	searchGroup := requiredUser.Group("/search")
 	searchManager, err := search.NewSearchManager(inferenceManager.ProcessOpenaiRequest)

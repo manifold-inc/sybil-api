@@ -105,6 +105,7 @@ func (im *InferenceManager) QueryModels(c *setup.Context, req *shared.RequestInf
 	if req.Stream && !canceled { // Check if the request is streaming
 		c.Response().Header().Set("Content-Type", "text/event-stream")
 		reader := bufio.NewScanner(res.Body)
+		var currentEvent string
 	scanner:
 		for reader.Scan() {
 			select {
@@ -119,11 +120,21 @@ func (im *InferenceManager) QueryModels(c *setup.Context, req *shared.RequestInf
 					continue
 				}
 
+				// Pass through to client
 				_, _ = fmt.Fprint(c.Response(), token+"\n\n")
 				c.Response().Flush()
 
+				// Handle Responses API event format
+				if strings.HasPrefix(token, "event: ") {
+					currentEvent = strings.TrimPrefix(token, "event: ")
+					// Check for completion event
+					if currentEvent == "response.completed" {
+						hasDone = true
+					}
+					continue
+				}
+
 				if !strings.HasPrefix(token, "data: ") {
-					c.Log.Warnw("non data response", "text", token)
 					continue
 				}
 
@@ -132,10 +143,13 @@ func (im *InferenceManager) QueryModels(c *setup.Context, req *shared.RequestInf
 					ttftRecorded = true
 					timer.Stop()
 				}
+
+				// Handle Chat/Completions [DONE]
 				if token == "data: [DONE]" {
 					hasDone = true
 					break scanner
 				}
+
 				// Extract the JSON part
 				jsonData := strings.TrimPrefix(token, "data: ")
 				var rawMessage json.RawMessage
