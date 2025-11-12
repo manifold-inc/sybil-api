@@ -395,22 +395,41 @@ func extractUsageData(response map[string]any, endpoint string) (*shared.Usage, 
 		return nil, errors.New("missing or invalid usage data")
 	}
 
-	promptTokens, err := getTokenCount(usageData, "prompt_tokens")
-	if err != nil {
-		return nil, fmt.Errorf("error getting prompt tokens: %w", err)
-	}
+	var promptTokens, completionTokens, totalTokens uint64
+	var err error
 
-	completionTokens := uint64(0)
-	if endpoint != shared.ENDPOINTS.EMBEDDING {
-		completionTokens, err = getTokenCount(usageData, "completion_tokens")
+	// Handle Responses API format (input_tokens, output_tokens)
+	if endpoint == shared.ENDPOINTS.RESPONSES {
+		promptTokens, err = getTokenCount(usageData, "input_tokens")
 		if err != nil {
-			return nil, fmt.Errorf("error getting completion tokens: %w", err)
+			return nil, fmt.Errorf("error getting input tokens: %w", err)
 		}
-	}
 
-	totalTokens, err := getTokenCount(usageData, "total_tokens")
-	if err != nil {
-		return nil, fmt.Errorf("error getting total tokens: %w", err)
+		completionTokens, err = getTokenCount(usageData, "output_tokens")
+		if err != nil {
+			return nil, fmt.Errorf("error getting output tokens: %w", err)
+		}
+
+		totalTokens = promptTokens + completionTokens
+	} else {
+		// Handle Chat/Completions format (prompt_tokens, completion_tokens)
+		promptTokens, err = getTokenCount(usageData, "prompt_tokens")
+		if err != nil {
+			return nil, fmt.Errorf("error getting prompt tokens: %w", err)
+		}
+
+		completionTokens = uint64(0)
+		if endpoint != shared.ENDPOINTS.EMBEDDING {
+			completionTokens, err = getTokenCount(usageData, "completion_tokens")
+			if err != nil {
+				return nil, fmt.Errorf("error getting completion tokens: %w", err)
+			}
+		}
+
+		totalTokens, err = getTokenCount(usageData, "total_tokens")
+		if err != nil {
+			return nil, fmt.Errorf("error getting total tokens: %w", err)
+		}
 	}
 
 	return &shared.Usage{
