@@ -102,7 +102,7 @@ func (im *InferenceManager) CompletionRequestNewHistory(cc echo.Context) error {
 			log.Errorw("Failed to generate history nanoid", "error", err)
 			return
 		}
-		historyID := "chat_" + historyIDNano
+		historyID := "chat-" + historyIDNano
 
 		insertQuery := `
 			INSERT INTO chat_history (
@@ -140,10 +140,6 @@ func (im *InferenceManager) UpdateHistory(cc echo.Context) error {
 	c := cc.(*setup.Context)
 
 	historyIDStr := c.Param("history_id")
-
-	if !strings.HasPrefix(historyIDStr, "chat_") {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid history_id"})
-	}
 
 	var userID uint64
 	checkQuery := `SELECT user_id FROM chat_history WHERE history_id = ?`
@@ -190,11 +186,11 @@ func (im *InferenceManager) UpdateHistory(cc echo.Context) error {
 
 	updateQuery := `
 		UPDATE chat_history 
-		SET messages = ?, updated_at = ?
+		SET messages = ?, updated_at = NOW()
 		WHERE history_id = ?
 	`
 
-	_, err = im.WDB.ExecContext(c.Request().Context(), updateQuery, string(messagesJSON), time.Now(), historyIDStr)
+	_, err = im.WDB.ExecContext(c.Request().Context(), updateQuery, string(messagesJSON), historyIDStr)
 	if err != nil {
 		c.Log.Errorw("Failed to update history in database",
 			"error", err.Error(),
