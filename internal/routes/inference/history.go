@@ -6,12 +6,12 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"strconv"
 	"strings"
 	"sybil-api/internal/setup"
 	"sybil-api/internal/shared"
 	"time"
 
+	"github.com/aidarkhanov/nanoid"
 	"github.com/labstack/echo/v4"
 	"go.uber.org/zap"
 )
@@ -33,27 +33,17 @@ func (im *InferenceManager) CompletionRequestNewHistory(cc echo.Context) error {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "failed to read request body"})
 	}
 
-	// Directly unmarshal into the correct type
-	var payload map[string]any
+	var payload shared.InferenceBody
 	if err := json.Unmarshal(body, &payload); err != nil {
 		c.Log.Errorw("Failed to parse request body", "error", err.Error())
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid JSON format"})
 	}
 
-	messagesRaw, ok := payload["messages"]
-	if !ok {
+	if len(payload.Messages) == 0 {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "messages are required"})
 	}
 
-	messagesBytes, err := json.Marshal(messagesRaw)
-	if err != nil {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid messages format"})
-	}
-
-	var messages []shared.ChatMessage
-	if err := json.Unmarshal(messagesBytes, &messages); err != nil {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid messages format"})
-	}
+	messages := payload.Messages
 
 	c.Request().Body = io.NopCloser(strings.NewReader(string(body)))
 
@@ -107,29 +97,32 @@ func (im *InferenceManager) CompletionRequestNewHistory(cc echo.Context) error {
 	}
 
 	go func(userID uint64, messagesJSON []byte, title *string, log *zap.SugaredLogger) {
+		historyIDNano, err := nanoid.Generate("0123456789abcdefghijklmnopqrstuvwxyz", 28)
+		if err != nil {
+			log.Errorw("Failed to generate history nanoid", "error", err)
+			return
+		}
+		historyID := "chat_" + historyIDNano
+
 		insertQuery := `
 			INSERT INTO chat_history (
 				user_id,
+				history_id,
 				messages,
 				title,
 				icon
-			) VALUES (?, ?, ?, ?)
+			) VALUES (?, ?, ?, ?, ?)
 		`
 
-		result, err := im.WDB.Exec(insertQuery,
+		_, err = im.WDB.Exec(insertQuery,
 			userID,
+			historyID,
 			string(messagesJSON),
 			title,
 			nil, // icon
 		)
 		if err != nil {
 			log.Errorw("Failed to insert history into database", "error", err)
-			return
-		}
-
-		historyID, err := result.LastInsertId()
-		if err != nil {
-			log.Errorw("Failed to get last insert id", "error", err)
 			return
 		}
 
@@ -146,27 +139,26 @@ func (im *InferenceManager) CompletionRequestNewHistory(cc echo.Context) error {
 func (im *InferenceManager) UpdateHistory(cc echo.Context) error {
 	c := cc.(*setup.Context)
 
-	// TODO @sean history IDs should be nanoids
 	historyIDStr := c.Param("history_id")
-	historyID, err := strconv.ParseUint(historyIDStr, 10, 64)
-	if err != nil {
+
+	if !strings.HasPrefix(historyIDStr, "chat_") {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid history_id"})
 	}
 
 	var userID uint64
-	checkQuery := `SELECT user_id FROM chat_history WHERE id = ?`
-	err = im.RDB.QueryRowContext(c.Request().Context(), checkQuery, historyID).Scan(&userID)
+	checkQuery := `SELECT user_id FROM chat_history WHERE history_id = ?`
+	err := im.RDB.QueryRowContext(c.Request().Context(), checkQuery, historyIDStr).Scan(&userID)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			c.Log.Errorw("History not found", "error", err.Error(), "history_id", historyID)
+			c.Log.Errorw("History not found", "error", err.Error(), "history_id", historyIDStr)
 			return c.JSON(http.StatusNotFound, map[string]string{"error": "history not found"})
 		}
-		c.Log.Errorw("Failed to check history", "error", err.Error(), "history_id", historyID)
+		c.Log.Errorw("Failed to check history", "error", err.Error(), "history_id", historyIDStr)
 		return c.JSON(http.StatusInternalServerError, shared.ErrInternalServerError)
 	}
 
 	if userID != c.User.UserID {
-		c.Log.Errorw("Unauthorized access to history", "history_id", historyID, "user_id", c.User.UserID, "owner_id", userID)
+		c.Log.Errorw("Unauthorized access to history", "history_id", historyIDStr, "user_id", c.User.UserID, "owner_id", userID)
 		return c.JSON(http.StatusForbidden, map[string]string{"error": "unauthorized"})
 	}
 
@@ -183,48 +175,35 @@ func (im *InferenceManager) UpdateHistory(cc echo.Context) error {
 	}
 
 	c.Log.Infow("Updating chat history",
-		"history_id", historyID,
+		"history_id", historyIDStr,
 		"user_id", c.User.UserID)
 
-	var setFields []string
-	var args []any
-
-	if req.Messages != nil {
-		if len(req.Messages) == 0 {
-			return c.JSON(http.StatusBadRequest, map[string]string{"error": "messages cannot be empty"})
-		}
-		messagesJSON, err := json.Marshal(req.Messages)
-		if err != nil {
-			c.Log.Errorw("Failed to marshal messages", "error", err)
-			return c.JSON(http.StatusInternalServerError, shared.ErrInternalServerError)
-		}
-		setFields = append(setFields, "messages = ?")
-		args = append(args, string(messagesJSON))
+	if len(req.Messages) == 0 {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "messages cannot be empty"})
 	}
 
-	if len(setFields) == 0 {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "no fields to update"})
+	messagesJSON, err := json.Marshal(req.Messages)
+	if err != nil {
+		c.Log.Errorw("Failed to marshal messages", "error", err)
+		return c.JSON(http.StatusInternalServerError, shared.ErrInternalServerError)
 	}
 
-	args = append(args, historyID)
-
-	// TODO @sean ONLY update the history
-	updateQuery := fmt.Sprintf(`
+	updateQuery := `
 		UPDATE chat_history 
-		SET %s
-		WHERE id = ?
-	`, strings.Join(setFields, ", "))
+		SET messages = ?, updated_at = ?
+		WHERE history_id = ?
+	`
 
-	_, err = im.WDB.ExecContext(c.Request().Context(), updateQuery, args...)
+	_, err = im.WDB.ExecContext(c.Request().Context(), updateQuery, string(messagesJSON), time.Now(), historyIDStr)
 	if err != nil {
 		c.Log.Errorw("Failed to update history in database",
 			"error", err.Error(),
-			"history_id", historyID)
+			"history_id", historyIDStr)
 		return c.JSON(http.StatusInternalServerError, shared.ErrInternalServerError)
 	}
 
 	c.Log.Infow("Successfully updated chat history",
-		"history_id", historyID,
+		"history_id", historyIDStr,
 		"user_id", c.User.UserID)
 
 	go func(userID uint64, log *zap.SugaredLogger) {
@@ -235,7 +214,7 @@ func (im *InferenceManager) UpdateHistory(cc echo.Context) error {
 
 	return c.JSON(http.StatusOK, map[string]any{
 		"message": "History updated successfully",
-		"id":      historyID,
+		"id":      historyIDStr,
 		"user_id": c.User.UserID,
 	})
 }
@@ -251,82 +230,46 @@ func extractContentFromResponse(responseContent string) string {
 }
 
 func extractContentFromSingleResponse(responseContent string) string {
-	// TODO @sean unmarshal directly into proper struct
-	var response map[string]any
+	var response shared.Response
 	if err := json.Unmarshal([]byte(responseContent), &response); err != nil {
 		return ""
 	}
 
-	choices, ok := getSlice(response, "choices")
-	if !ok || len(choices) == 0 {
+	if len(response.Choices) == 0 {
 		return ""
 	}
 
-	choice, ok := getMap(choices[0])
-	if !ok {
+	choice := response.Choices[0]
+	if choice.Message == nil {
 		return ""
 	}
 
-	message, ok := getMap(choice["message"])
-	if !ok {
-		return ""
-	}
-
-	content, ok := message["content"].(string)
-	if !ok {
-		return ""
-	}
-
-	return content
+	return choice.Message.Content
 }
 
 func extractContentFromStreamingResponse(responseContent string) string {
-	// TODO @sean unmarshal directly into proper struct
-	var chunks []map[string]any
+	var chunks []shared.Response
 	if err := json.Unmarshal([]byte(responseContent), &chunks); err != nil {
 		return ""
 	}
 
 	var fullContent strings.Builder
 	for _, chunk := range chunks {
-		choices, ok := getSlice(chunk, "choices")
-		if !ok || len(choices) == 0 {
+		if len(chunk.Choices) == 0 {
 			continue
 		}
 
-		choice, ok := getMap(choices[0])
-		if !ok {
+		choice := chunk.Choices[0]
+		if choice.Delta == nil {
 			continue
 		}
 
-		delta, ok := getMap(choice["delta"])
-		if !ok {
-			continue
-		}
-
-		if content, ok := delta["content"].(string); ok {
-			fullContent.WriteString(content)
+		if choice.Delta.Content != "" {
+			fullContent.WriteString(choice.Delta.Content)
 		}
 	}
 
 	return fullContent.String()
-}
-
-func getSlice(m map[string]any, key string) ([]any, bool) {
-	val, ok := m[key]
-	if !ok {
-		return nil, false
-	}
-	slice, ok := val.([]any)
-	return slice, ok
-}
-
-func getMap(val any) (map[string]any, bool) {
-	if val == nil {
-		return nil, false
-	}
-	m, ok := val.(map[string]any)
-	return m, ok
 }
 
 func (im *InferenceManager) updateUserStreak(userID uint64, log *zap.SugaredLogger) error {
