@@ -18,14 +18,10 @@ import (
 
 type CreateHistoryRequest struct {
 	Messages []shared.ChatMessage `json:"messages"`
-	Title    *string              `json:"title,omitempty"`
-	Icon     *string              `json:"icon,omitempty"`
 }
 
 type UpdateHistoryRequest struct {
 	Messages []shared.ChatMessage `json:"messages,omitempty"`
-	Title    *string              `json:"title,omitempty"`
-	Icon     *string              `json:"icon,omitempty"`
 }
 
 func (im *InferenceManager) CompletionRequestNewHistory(cc echo.Context) error {
@@ -37,6 +33,7 @@ func (im *InferenceManager) CompletionRequestNewHistory(cc echo.Context) error {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "failed to read request body"})
 	}
 
+	// Directly unmarshal into the correct type
 	var payload map[string]any
 	if err := json.Unmarshal(body, &payload); err != nil {
 		c.Log.Errorw("Failed to parse request body", "error", err.Error())
@@ -84,13 +81,11 @@ func (im *InferenceManager) CompletionRequestNewHistory(cc echo.Context) error {
 	var allMessages []shared.ChatMessage
 	allMessages = append(allMessages, messages...)
 
-	if responseContent != "" {
-		if content := extractContentFromResponse(responseContent); content != "" {
-			allMessages = append(allMessages, shared.ChatMessage{
-				Role:    "assistant",
-				Content: content,
-			})
-		}
+	if content := extractContentFromResponse(responseContent); content != "" {
+		allMessages = append(allMessages, shared.ChatMessage{
+			Role:    "assistant",
+			Content: content,
+		})
 	}
 
 	messagesJSON, err := json.Marshal(allMessages)
@@ -151,6 +146,7 @@ func (im *InferenceManager) CompletionRequestNewHistory(cc echo.Context) error {
 func (im *InferenceManager) UpdateHistory(cc echo.Context) error {
 	c := cc.(*setup.Context)
 
+	// TODO @sean history IDs should be nanoids
 	historyIDStr := c.Param("history_id")
 	historyID, err := strconv.ParseUint(historyIDStr, 10, 64)
 	if err != nil {
@@ -206,28 +202,13 @@ func (im *InferenceManager) UpdateHistory(cc echo.Context) error {
 		args = append(args, string(messagesJSON))
 	}
 
-	if req.Title != nil {
-		if len(*req.Title) > 255 {
-			return c.JSON(http.StatusBadRequest, map[string]string{"error": "title must be 255 characters or less"})
-		}
-		setFields = append(setFields, "title = ?")
-		args = append(args, *req.Title)
-	}
-
-	if req.Icon != nil {
-		if len(*req.Icon) > 50 {
-			return c.JSON(http.StatusBadRequest, map[string]string{"error": "icon must be 50 characters or less"})
-		}
-		setFields = append(setFields, "icon = ?")
-		args = append(args, *req.Icon)
-	}
-
 	if len(setFields) == 0 {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "no fields to update"})
 	}
 
 	args = append(args, historyID)
 
+	// TODO @sean ONLY update the history
 	updateQuery := fmt.Sprintf(`
 		UPDATE chat_history 
 		SET %s
@@ -260,6 +241,9 @@ func (im *InferenceManager) UpdateHistory(cc echo.Context) error {
 }
 
 func extractContentFromResponse(responseContent string) string {
+	if responseContent == "" {
+		return ""
+	}
 	if content := extractContentFromSingleResponse(responseContent); content != "" {
 		return content
 	}
@@ -267,6 +251,7 @@ func extractContentFromResponse(responseContent string) string {
 }
 
 func extractContentFromSingleResponse(responseContent string) string {
+	// TODO @sean unmarshal directly into proper struct
 	var response map[string]any
 	if err := json.Unmarshal([]byte(responseContent), &response); err != nil {
 		return ""
@@ -296,6 +281,7 @@ func extractContentFromSingleResponse(responseContent string) string {
 }
 
 func extractContentFromStreamingResponse(responseContent string) string {
+	// TODO @sean unmarshal directly into proper struct
 	var chunks []map[string]any
 	if err := json.Unmarshal([]byte(responseContent), &chunks); err != nil {
 		return ""
