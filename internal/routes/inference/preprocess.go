@@ -94,6 +94,8 @@ func (im *InferenceManager) preprocessOpenAIRequest(
 			}
 		}
 
+		
+
 		if (userInfo.Credits == 0 && userInfo.PlanRequests == 0) && !userInfo.AllowOverspend {
 			c.Log.Infow("No credits available", "user_id", userInfo.UserID)
 			return nil, &shared.RequestError{
@@ -119,6 +121,32 @@ func (im *InferenceManager) preprocessOpenAIRequest(
 			Stream:    false,
 		}, nil
 	}
+
+	if endpoint == shared.ENDPOINTS.RESPONSES {
+		input, ok := payload["input"]
+		if !ok {
+			return nil, &shared.RequestError{
+				StatusCode: 400,
+				Err:        errors.New("input is required for responses"),
+			}
+		}
+
+		inputArray, ok := input.([]any)
+		if !ok {
+			return nil, &shared.RequestError{
+				StatusCode: 400,
+				Err:        errors.New("input must be an array"),
+			}
+		}
+
+		if len(inputArray) == 0 {
+			return nil, &shared.RequestError{
+				StatusCode: 400,
+				Err:        errors.New("input array cannot be empty"),
+			}
+		}
+	}
+
 
 	if (userInfo.Credits == 0 && userInfo.PlanRequests == 0) && !userInfo.AllowOverspend {
 		c.Log.Warnw("Insufficient credits or requests",
