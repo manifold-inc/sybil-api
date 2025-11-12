@@ -82,10 +82,17 @@ func main() {
 	inferenceGroup.POST("/chat/completions", inferenceManager.ChatRequest)
 	inferenceGroup.POST("/completions", inferenceManager.CompletionRequest)
 	inferenceGroup.POST("/embeddings", inferenceManager.EmbeddingRequest)
+<<<<<<< HEAD
 	inferenceGroup.POST("/responses", inferenceManager.ResponsesRequest)
+=======
+	inferenceGroup.POST("/chat/history/new", inferenceManager.CompletionRequestNewHistory)
+	inferenceGroup.PATCH("/chat/history/:history_id", inferenceManager.UpdateHistory)
+>>>>>>> beta
 
 	searchGroup := requiredUser.Group("/search")
-	searchManager, err := search.NewSearchManager(inferenceManager.ProcessOpenaiRequest)
+	searchManager, err := search.NewSearchManager(func(c echo.Context, endpoint string) (string, error) {
+		return inferenceManager.ProcessOpenaiRequest(c, endpoint)
+	})
 	if err != nil {
 		panic(err)
 	}

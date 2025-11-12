@@ -19,10 +19,15 @@ type Response struct {
 }
 
 type Choice struct {
-	Delta Delta `json:"delta"`
+	Delta   *Delta   `json:"delta,omitempty"`
+	Message *Message `json:"message,omitempty"`
 }
 type Delta struct {
 	Content string `json:"content"`
+}
+type Message struct {
+	Content string `json:"content"`
+	Role    string `json:"role,omitempty"`
 }
 
 type InferenceBody struct {
