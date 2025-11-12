@@ -18,7 +18,7 @@ import (
 	"google.golang.org/api/option"
 )
 
-type InferenceFunc func(c echo.Context, endpoint string) error
+type InferenceFunc func(c echo.Context, endpoint string) (string, error)
 
 type SearchManager struct {
 	GoogleSearchEngineID string
