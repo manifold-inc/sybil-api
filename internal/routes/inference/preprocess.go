@@ -34,6 +34,11 @@ func (im *InferenceManager) EmbeddingRequest(c echo.Context) error {
 	return err
 }
 
+func (im *InferenceManager) ResponsesRequest(c echo.Context) error {
+	_, err := im.ProcessOpenaiRequest(c, shared.ENDPOINTS.RESPONSES)
+	return err
+}
+
 func (im *InferenceManager) preprocessOpenAIRequest(
 	c *setup.Context,
 	endpoint string,
@@ -97,6 +102,8 @@ func (im *InferenceManager) preprocessOpenAIRequest(
 			}
 		}
 
+		
+
 		if (userInfo.Credits == 0 && userInfo.PlanRequests == 0) && !userInfo.AllowOverspend {
 			c.Log.Infow("No credits available", "user_id", userInfo.UserID)
 			return nil, &shared.RequestError{
@@ -122,6 +129,32 @@ func (im *InferenceManager) preprocessOpenAIRequest(
 			Stream:    false,
 		}, nil
 	}
+
+	if endpoint == shared.ENDPOINTS.RESPONSES {
+		input, ok := payload["input"]
+		if !ok {
+			return nil, &shared.RequestError{
+				StatusCode: 400,
+				Err:        errors.New("input is required for responses"),
+			}
+		}
+
+		inputArray, ok := input.([]any)
+		if !ok {
+			return nil, &shared.RequestError{
+				StatusCode: 400,
+				Err:        errors.New("input must be an array"),
+			}
+		}
+
+		if len(inputArray) == 0 {
+			return nil, &shared.RequestError{
+				StatusCode: 400,
+				Err:        errors.New("input array cannot be empty"),
+			}
+		}
+	}
+
 
 	if (userInfo.Credits == 0 && userInfo.PlanRequests == 0) && !userInfo.AllowOverspend {
 		c.Log.Warnw("Insufficient credits or requests",
@@ -371,22 +404,41 @@ func extractUsageData(response map[string]any, endpoint string) (*shared.Usage, 
 		return nil, errors.New("missing or invalid usage data")
 	}
 
-	promptTokens, err := getTokenCount(usageData, "prompt_tokens")
-	if err != nil {
-		return nil, fmt.Errorf("error getting prompt tokens: %w", err)
-	}
+	var promptTokens, completionTokens, totalTokens uint64
+	var err error
 
-	completionTokens := uint64(0)
-	if endpoint != shared.ENDPOINTS.EMBEDDING {
-		completionTokens, err = getTokenCount(usageData, "completion_tokens")
+	// Handle Responses API format (input_tokens, output_tokens)
+	if endpoint == shared.ENDPOINTS.RESPONSES {
+		promptTokens, err = getTokenCount(usageData, "input_tokens")
 		if err != nil {
-			return nil, fmt.Errorf("error getting completion tokens: %w", err)
+			return nil, fmt.Errorf("error getting input tokens: %w", err)
 		}
-	}
 
-	totalTokens, err := getTokenCount(usageData, "total_tokens")
-	if err != nil {
-		return nil, fmt.Errorf("error getting total tokens: %w", err)
+		completionTokens, err = getTokenCount(usageData, "output_tokens")
+		if err != nil {
+			return nil, fmt.Errorf("error getting output tokens: %w", err)
+		}
+
+		totalTokens = promptTokens + completionTokens
+	} else {
+		// Handle Chat/Completions format (prompt_tokens, completion_tokens)
+		promptTokens, err = getTokenCount(usageData, "prompt_tokens")
+		if err != nil {
+			return nil, fmt.Errorf("error getting prompt tokens: %w", err)
+		}
+
+		completionTokens = uint64(0)
+		if endpoint != shared.ENDPOINTS.EMBEDDING {
+			completionTokens, err = getTokenCount(usageData, "completion_tokens")
+			if err != nil {
+				return nil, fmt.Errorf("error getting completion tokens: %w", err)
+			}
+		}
+
+		totalTokens, err = getTokenCount(usageData, "total_tokens")
+		if err != nil {
+			return nil, fmt.Errorf("error getting total tokens: %w", err)
+		}
 	}
 
 	return &shared.Usage{
