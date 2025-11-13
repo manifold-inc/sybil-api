@@ -102,8 +102,6 @@ func (im *InferenceManager) preprocessOpenAIRequest(
 			}
 		}
 
-		
-
 		if (userInfo.Credits == 0 && userInfo.PlanRequests == 0) && !userInfo.AllowOverspend {
 			c.Log.Infow("No credits available", "user_id", userInfo.UserID)
 			return nil, &shared.RequestError{
@@ -154,7 +152,6 @@ func (im *InferenceManager) preprocessOpenAIRequest(
 			}
 		}
 	}
-
 
 	if (userInfo.Credits == 0 && userInfo.PlanRequests == 0) && !userInfo.AllowOverspend {
 		c.Log.Warnw("Insufficient credits or requests",
@@ -278,7 +275,6 @@ func (im *InferenceManager) ProcessOpenaiRequest(cc echo.Context, endpoint strin
 			Type:    "InternalError",
 			Code:    500,
 		})
-		return "", nil
 	}
 
 	// Asynchronously process request and return to the user
