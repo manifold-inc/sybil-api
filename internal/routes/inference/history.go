@@ -44,7 +44,38 @@ func (im *InferenceManager) CompletionRequestNewHistory(cc echo.Context) error {
 	}
 
 	messages := payload.Messages
-	providedHistoryID := payload.HistoryID
+
+	historyIDNano, err := nanoid.Generate("0123456789abcdefghijklmnopqrstuvwxyz", 28)
+	if err != nil {
+		c.Log.Errorw("Failed to generate history nanoid", "error", err)
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to generate history ID"})
+	}
+	historyID := "chat-" + historyIDNano
+
+	stream := payload.Stream
+	var rawPayload map[string]any
+	if err := json.Unmarshal(body, &rawPayload); err == nil {
+		if streamVal, exists := rawPayload["stream"]; exists {
+			stream = streamVal.(bool)
+		} else {
+			stream = shared.DefaultStreamOption
+		}
+	} else {
+		if !stream {
+			stream = shared.DefaultStreamOption
+		}
+	}
+
+	if stream {
+		c.Response().Header().Set("Content-Type", "text/event-stream")
+		historyIDEvent := map[string]any{
+			"type": "history_id",
+			"id":   historyID,
+		}
+		historyIDJSON, _ := json.Marshal(historyIDEvent)
+		fmt.Fprintf(c.Response(), "data: %s\n\n", string(historyIDJSON))
+		c.Response().Flush()
+	}
 
 	c.Request().Body = io.NopCloser(strings.NewReader(string(body)))
 
@@ -97,19 +128,7 @@ func (im *InferenceManager) CompletionRequestNewHistory(cc echo.Context) error {
 		}
 	}
 
-	go func(userID uint64, providedHistoryID *string, messagesJSON []byte, title *string, log *zap.SugaredLogger) {
-		var historyID string
-		if providedHistoryID != nil {
-			historyID = *providedHistoryID
-		} else {
-			historyIDNano, err := nanoid.Generate("0123456789abcdefghijklmnopqrstuvwxyz", 27)
-			if err != nil {
-				log.Errorw("Failed to generate history nanoid", "error", err)
-				return
-			}
-			historyID = "chat-" + historyIDNano
-		}
-
+	go func(userID uint64, historyID string, messagesJSON []byte, title *string, log *zap.SugaredLogger) {
 		insertQuery := `
 			INSERT INTO chat_history (
 				user_id,
@@ -137,7 +156,7 @@ func (im *InferenceManager) CompletionRequestNewHistory(cc echo.Context) error {
 		if err := im.updateUserStreak(userID, log); err != nil {
 			log.Errorw("Failed to update user streak", "error", err, "user_id", userID)
 		}
-	}(c.User.UserID, providedHistoryID, messagesJSON, title, c.Log)
+	}(c.User.UserID, historyID, messagesJSON, title, c.Log)
 
 	return nil
 }

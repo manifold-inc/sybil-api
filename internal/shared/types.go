@@ -37,7 +37,6 @@ type InferenceBody struct {
 	MaxTokens   int           `json:"max_tokens"`
 	Stream      bool          `json:"stream"`
 	Logprobs    bool          `json:"logprobs"`
-	HistoryID   *string       `json:"history_id,omitempty"`
 }
 
 type SearchResults struct {
