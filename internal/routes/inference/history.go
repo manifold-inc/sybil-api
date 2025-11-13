@@ -44,6 +44,7 @@ func (im *InferenceManager) CompletionRequestNewHistory(cc echo.Context) error {
 	}
 
 	messages := payload.Messages
+	providedHistoryID := payload.HistoryID
 
 	c.Request().Body = io.NopCloser(strings.NewReader(string(body)))
 
@@ -96,13 +97,18 @@ func (im *InferenceManager) CompletionRequestNewHistory(cc echo.Context) error {
 		}
 	}
 
-	go func(userID uint64, messagesJSON []byte, title *string, log *zap.SugaredLogger) {
-		historyIDNano, err := nanoid.Generate("0123456789abcdefghijklmnopqrstuvwxyz", 28)
-		if err != nil {
-			log.Errorw("Failed to generate history nanoid", "error", err)
-			return
+	go func(userID uint64, providedHistoryID *string, messagesJSON []byte, title *string, log *zap.SugaredLogger) {
+		var historyID string
+		if providedHistoryID != nil {
+			historyID = *providedHistoryID
+		} else {
+			historyIDNano, err := nanoid.Generate("0123456789abcdefghijklmnopqrstuvwxyz", 27)
+			if err != nil {
+				log.Errorw("Failed to generate history nanoid", "error", err)
+				return
+			}
+			historyID = "chat-" + historyIDNano
 		}
-		historyID := "chat-" + historyIDNano
 
 		insertQuery := `
 			INSERT INTO chat_history (
@@ -114,7 +120,7 @@ func (im *InferenceManager) CompletionRequestNewHistory(cc echo.Context) error {
 			) VALUES (?, ?, ?, ?, ?)
 		`
 
-		_, err = im.WDB.Exec(insertQuery,
+		_, err := im.WDB.Exec(insertQuery,
 			userID,
 			historyID,
 			string(messagesJSON),
@@ -131,7 +137,7 @@ func (im *InferenceManager) CompletionRequestNewHistory(cc echo.Context) error {
 		if err := im.updateUserStreak(userID, log); err != nil {
 			log.Errorw("Failed to update user streak", "error", err, "user_id", userID)
 		}
-	}(c.User.UserID, messagesJSON, title, c.Log)
+	}(c.User.UserID, providedHistoryID, messagesJSON, title, c.Log)
 
 	return nil
 }
