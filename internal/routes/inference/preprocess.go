@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"slices"
-	"sync"
 	"time"
 
 	"sybil-api/internal/setup"
@@ -39,38 +38,32 @@ func (im *InferenceManager) ResponsesRequest(c echo.Context) error {
 	return err
 }
 
-func (im *InferenceManager) preprocessOpenAIRequest(
-	c *setup.Context,
-	endpoint string,
+func (im *InferenceManager) Preprocess(
+	inv *Invocation,
 ) (*shared.RequestInfo, *shared.RequestError) {
 	startTime := time.Now()
 
-	userInfo := c.User
-
-	// Ensure properly formatted request
-	body, _ := io.ReadAll(c.Request().Body)
-
 	// Unmarshal to generic map to set defaults
 	var payload map[string]any
-	err := json.Unmarshal(body, &payload)
+	err := json.Unmarshal(inv.Body, &payload)
 	if err != nil {
-		c.Log.Warnw("failed json unmarshal to payload map", "error", err.Error())
+		inv.Log.Warnw("failed json unmarshal to payload map", "error", err.Error())
 		return nil, &shared.RequestError{StatusCode: 400, Err: errors.New("malformed request")}
 	}
 
 	// validate models and set defaults
 	model, ok := payload["model"]
 	if !ok {
-		c.Log.Infow("missing model parameter", "error", "model is required")
+		inv.Log.Infow("missing model parameter", "error", "model is required")
 		return nil, &shared.RequestError{StatusCode: 400, Err: errors.New("model is required")}
 	}
 
 	modelName := model.(string)
 
 	// Add model and endpoint to logger context for all subsequent logs
-	c.Log = c.Log.With("model", modelName, "endpoint", endpoint)
+	inv.Log = inv.Log.With("model", modelName, "endpoint", inv.Endpoint)
 
-	if endpoint == shared.ENDPOINTS.EMBEDDING {
+	if inv.Endpoint == shared.ENDPOINTS.EMBEDDING {
 
 		input, ok := payload["input"]
 		if !ok {
@@ -102,33 +95,33 @@ func (im *InferenceManager) preprocessOpenAIRequest(
 			}
 		}
 
-		if (userInfo.Credits == 0 && userInfo.PlanRequests == 0) && !userInfo.AllowOverspend {
-			c.Log.Infow("No credits available", "user_id", userInfo.UserID)
+		if (inv.Credits == 0 && inv.PlanRequests == 0) && !inv.AllowOverspend {
+			inv.Log.Infow("No credits available", "user_id", inv.UserID)
 			return nil, &shared.RequestError{
 				StatusCode: 402,
 				Err:        errors.New("insufficient credits"),
 			}
 		}
 
-		body, err = json.Marshal(payload)
+		body, err := json.Marshal(payload)
 		if err != nil {
-			c.Log.Errorw("Failed to marshal request body", "error", err.Error())
+			inv.Log.Errorw("Failed to marshal request body", "error", err.Error())
 			return nil, &shared.RequestError{StatusCode: 500, Err: errors.New("internal server error")}
 		}
 
 		return &shared.RequestInfo{
 			Body:      body,
-			UserID:    userInfo.UserID,
-			Credits:   userInfo.Credits,
-			ID:        c.Reqid,
+			UserID:    inv.UserID,
+			Credits:   inv.Credits,
+			ID:        inv.RequestID,
 			StartTime: startTime,
-			Endpoint:  endpoint,
+			Endpoint:  inv.Endpoint,
 			Model:     modelName,
 			Stream:    false,
 		}, nil
 	}
 
-	if endpoint == shared.ENDPOINTS.RESPONSES {
+	if inv.Endpoint == shared.ENDPOINTS.RESPONSES {
 		input, ok := payload["input"]
 		if !ok {
 			return nil, &shared.RequestError{
@@ -153,11 +146,11 @@ func (im *InferenceManager) preprocessOpenAIRequest(
 		}
 	}
 
-	if (userInfo.Credits == 0 && userInfo.PlanRequests == 0) && !userInfo.AllowOverspend {
-		c.Log.Warnw("Insufficient credits or requests",
-			"credits", userInfo.Credits,
-			"plan_requests", userInfo.PlanRequests,
-			"allow_overspend", userInfo.AllowOverspend)
+	if (inv.Credits == 0 && inv.PlanRequests == 0) && !inv.AllowOverspend {
+		inv.Log.Warnw("Insufficient credits or requests",
+			"credits", inv.Credits,
+			"plan_requests", inv.PlanRequests,
+			"allow_overspend", inv.AllowOverspend)
 		return nil, &shared.RequestError{
 			StatusCode: 402,
 			Err:        errors.New("insufficient requests or credits"),
@@ -172,7 +165,7 @@ func (im *InferenceManager) preprocessOpenAIRequest(
 	stream := payload["stream"].(bool)
 
 	// Add stream to logger context
-	c.Log = c.Log.With("stream", stream)
+	inv.Log = inv.Log.With("stream", stream)
 
 	// If streaming is enabled (either by default or explicitly), include usage data
 	if stream {
@@ -182,8 +175,8 @@ func (im *InferenceManager) preprocessOpenAIRequest(
 	}
 
 	// Log user id 3's request parameters
-	if userInfo.UserID == 3 {
-		c.Log.Infow("User 3 request payload",
+	if inv.UserID == 3 {
+		inv.Log.Infow("User 3 request payload",
 			"model", modelName,
 			"stream", stream,
 			"max_tokens", payload["max_tokens"],
@@ -194,19 +187,19 @@ func (im *InferenceManager) preprocessOpenAIRequest(
 	}
 
 	// repackage body
-	body, err = json.Marshal(payload)
+	body, err := json.Marshal(payload)
 	if err != nil {
-		c.Log.Errorw("Failed to marshal request body", "error", err.Error())
+		inv.Log.Errorw("Failed to marshal request body", "error", err.Error())
 		return nil, &shared.RequestError{StatusCode: 500, Err: errors.New("internal server error")}
 	}
 
 	reqInfo := &shared.RequestInfo{
 		Body:      body,
-		UserID:    userInfo.UserID,
-		Credits:   userInfo.Credits,
-		ID:        c.Reqid,
+		UserID:    inv.UserID,
+		Credits:   inv.Credits,
+		ID:        inv.RequestID,
 		StartTime: startTime,
-		Endpoint:  endpoint,
+		Endpoint:  inv.Endpoint,
 		Model:     modelName,
 		Stream:    stream,
 	}
@@ -217,53 +210,38 @@ func (im *InferenceManager) preprocessOpenAIRequest(
 func (im *InferenceManager) ProcessOpenaiRequest(cc echo.Context, endpoint string) (string, error) {
 	c := cc.(*setup.Context)
 
-	// Add endpoint to logger context
-	c.Log = c.Log.With("endpoint", endpoint)
-
-	reqInfo, preprocessError := im.preprocessOpenAIRequest(c, endpoint)
-	if preprocessError != nil {
-		if preprocessError.StatusCode >= 500 {
-			c.Log.Warnw("Preprocess error", "error", preprocessError.Err.Error())
-		}
-		return "", c.String(preprocessError.StatusCode, preprocessError.Error())
+	// Read HTTP body once
+	body, err := io.ReadAll(c.Request().Body)
+	if err != nil {
+		c.Log.Warnw("Failed to read request body", "error", err.Error())
+		return "", c.String(400, "failed to read request body")
 	}
 
-	im.usageCache.AddInFlightToBucket(reqInfo.UserID)
-
-	// ensure we remove inflight BEFORE we add this to a bucket
-	mu := sync.Mutex{}
-	mu.Lock()
-	defer func() {
-		im.usageCache.RemoveInFlightFromBucket(reqInfo.UserID)
-		mu.Unlock()
-	}()
-
-	resInfo, qerr := im.QueryModels(c, reqInfo)
-	if qerr != nil {
-		c.Log.Warnw("QueryModels failed",
-			"error", qerr.Error(),
-			"status_code", qerr.StatusCode)
-
-		/* TODO: Revisit overload logic
-		if qerr.StatusCode == 502 {
-			overload.TrackTPS(
-				c.Core,
-				c.ModelDNS,
-				1,
-			)
-		} */
-
-		return "", c.JSON(qerr.StatusCode, shared.OpenAIError{
-			Message: qerr.Error(),
-			Object:  "error",
-			Type:    "InternalError",
-			Code:    qerr.StatusCode,
-		})
+	// Build Invocation from HTTP request
+	inv := &Invocation{
+		Ctx:            c.Request().Context(),
+		UserID:         c.User.UserID,
+		Credits:        c.User.Credits,
+		PlanRequests:   c.User.PlanRequests,
+		AllowOverspend: c.User.AllowOverspend,
+		RequestID:      c.Reqid,
+		Endpoint:       endpoint,
+		Body:           body,
+		Metadata:       map[string]any{},
+		Log:            c.Log.With("endpoint", endpoint),
 	}
 
-	// Extract usage data from the response content
+	// Build Responder adapter
+	resp := NewEchoResponder(c)
+
+	reqInfo, resInfo, processErr := im.Process(inv, resp)
+	if processErr != nil {
+		return "", processErr
+	}
+
+	// Validate response
 	if resInfo.ResponseContent == "" || !resInfo.Completed {
-		c.Log.Errorw("No response or incomplete response from model",
+		inv.Log.Errorw("No response or incomplete response from model",
 			"response_content_length", len(resInfo.ResponseContent),
 			"completed", resInfo.Completed,
 			"canceled", resInfo.Canceled,
@@ -277,8 +255,7 @@ func (im *InferenceManager) ProcessOpenaiRequest(cc echo.Context, endpoint strin
 		})
 	}
 
-	// Asynchronously process request and return to the user
-	log := c.Log
+	asyncLog := inv.Log
 	go func() {
 		switch true {
 		case !resInfo.Completed:
@@ -287,7 +264,7 @@ func (im *InferenceManager) ProcessOpenaiRequest(cc echo.Context, endpoint strin
 			var chunks []map[string]any
 			err := json.Unmarshal([]byte(resInfo.ResponseContent), &chunks)
 			if err != nil {
-				log.Errorw(
+				asyncLog.Errorw(
 					"Failed to unmarshal streaming ResponseContent as JSON array of chunks",
 					"error",
 					err,
@@ -304,7 +281,7 @@ func (im *InferenceManager) ProcessOpenaiRequest(cc echo.Context, endpoint strin
 						resInfo.Usage = extractedUsage
 						break
 					}
-					log.Warnw(
+					asyncLog.Warnw(
 						"Failed to extract usage data from a response chunk that had a non-null usage field",
 						"chunk_index",
 						i,
@@ -317,7 +294,7 @@ func (im *InferenceManager) ProcessOpenaiRequest(cc echo.Context, endpoint strin
 			var singleResponse map[string]any
 			err := json.Unmarshal([]byte(resInfo.ResponseContent), &singleResponse)
 			if err != nil {
-				log.Errorw(
+				asyncLog.Errorw(
 					"Failed to unmarshal non-streaming ResponseContent as single JSON object",
 					"error",
 					err,
@@ -332,7 +309,7 @@ func (im *InferenceManager) ProcessOpenaiRequest(cc echo.Context, endpoint strin
 					resInfo.Usage = extractedUsage
 					break
 				}
-				log.Warnw(
+				asyncLog.Warnw(
 					"Failed to extract usage data from single response object that had a non-null usage field",
 				)
 			}
@@ -372,9 +349,7 @@ func (im *InferenceManager) ProcessOpenaiRequest(cc echo.Context, endpoint strin
 			)
 		}
 		*/
-		mu.Lock()
 		im.usageCache.AddRequestToBucket(reqInfo.UserID, pqi, reqInfo.ID)
-		mu.Unlock()
 	}()
 
 	return resInfo.ResponseContent, nil

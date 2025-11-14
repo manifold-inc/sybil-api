@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"sybil-api/internal/buckets"
+	"sybil-api/internal/shared"
 
 	"github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
@@ -93,6 +94,24 @@ func (im *InferenceManager) getHTTPClient(modelURL string) *http.Client {
 	im.Log.Infow("Created new HTTP client for host", "host", host, "full_url", modelURL)
 
 	return client
+}
+
+
+func (im *InferenceManager) Process(inv *Invocation, resp Responder) (*shared.RequestInfo, *shared.ResponseInfo, error) {
+	reqInfo, preprocessError := im.Preprocess(inv)
+	if preprocessError != nil {
+		return nil, nil, resp.SendError(preprocessError)
+	}
+
+	im.usageCache.AddInFlightToBucket(reqInfo.UserID)
+	defer im.usageCache.RemoveInFlightFromBucket(reqInfo.UserID)
+
+	resInfo, queryError := im.QueryModels(inv, reqInfo, resp)
+	if queryError != nil {
+		return reqInfo, nil, resp.SendError(queryError)
+	}
+
+	return reqInfo, resInfo, nil
 }
 
 func (im *InferenceManager) ShutDown() {
