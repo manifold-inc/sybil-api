@@ -236,10 +236,22 @@ func (im *InferenceManager) ProcessOpenaiRequest(cc echo.Context, endpoint strin
 
 	reqInfo, resInfo, processErr := im.Process(inv, resp)
 	if processErr != nil {
-		return "", processErr
+		// Error response already sent, just return (no additional response needed)
+		return "", nil
 	}
 
-	// Validate response
+	// Success case - validate response
+	if resInfo == nil {
+		inv.Log.Errorw("Process returned nil resInfo without error")
+		_ = c.JSON(500, shared.OpenAIError{
+			Message: "internal error: no response info",
+			Object:  "error",
+			Type:    "InternalError",
+			Code:    500,
+		})
+		return "", nil
+	}
+	
 	if resInfo.ResponseContent == "" || !resInfo.Completed {
 		inv.Log.Errorw("No response or incomplete response from model",
 			"response_content_length", len(resInfo.ResponseContent),

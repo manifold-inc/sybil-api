@@ -100,7 +100,8 @@ func (im *InferenceManager) getHTTPClient(modelURL string) *http.Client {
 func (im *InferenceManager) Process(inv *Invocation, resp Responder) (*shared.RequestInfo, *shared.ResponseInfo, error) {
 	reqInfo, preprocessError := im.Preprocess(inv)
 	if preprocessError != nil {
-		return nil, nil, resp.SendError(preprocessError)
+		_ = resp.SendError(preprocessError)
+		return nil, nil, preprocessError // Error response sent, return error for logging
 	}
 
 	im.usageCache.AddInFlightToBucket(reqInfo.UserID)
@@ -108,7 +109,8 @@ func (im *InferenceManager) Process(inv *Invocation, resp Responder) (*shared.Re
 
 	resInfo, queryError := im.QueryModels(inv, reqInfo, resp)
 	if queryError != nil {
-		return reqInfo, nil, resp.SendError(queryError)
+		_ = resp.SendError(queryError)
+		return reqInfo, nil, queryError // Error response sent, return error for logging
 	}
 
 	return reqInfo, resInfo, nil
