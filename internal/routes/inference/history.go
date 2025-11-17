@@ -45,13 +45,71 @@ func (im *InferenceManager) CompletionRequestNewHistory(cc echo.Context) error {
 
 	messages := payload.Messages
 
+	historyIDNano, err := nanoid.Generate("0123456789abcdefghijklmnopqrstuvwxyz", 11)
+	if err != nil {
+		c.Log.Errorw("Failed to generate history nanoid", "error", err)
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to generate history ID"})
+	}
+	historyID := "chat-" + historyIDNano
+
+	var title *string
+	for _, msg := range messages {
+		if msg.Role == "user" && msg.Content != "" {
+			titleStr := msg.Content
+			if len(titleStr) > 32 {
+				titleStr = titleStr[:32]
+			}
+			title = &titleStr
+			break
+		}
+	}
+
+	messagesJSON, err := json.Marshal(messages)
+	if err != nil {
+		c.Log.Errorw("Failed to marshal initial messages", "error", err)
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to prepare history"})
+	}
+
+	insertQuery := `
+		INSERT INTO chat_history (
+			user_id,
+			history_id,
+			messages,
+			title,
+			icon
+		) VALUES (?, ?, ?, ?, ?)
+	`
+
+	_, err = im.WDB.Exec(insertQuery,
+		c.User.UserID,
+		historyID,
+		string(messagesJSON),
+		title,
+		nil, // icon
+	)
+	if err != nil {
+		c.Log.Errorw("Failed to insert history into database", "error", err)
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to create history"})
+	}
+
+	c.Log.Infow("Chat history created", "history_id", historyID, "user_id", c.User.UserID)
+
+	c.Response().Header().Set("Content-Type", "text/event-stream")
+	historyIDEvent := map[string]any{
+		"type": "history_id",
+		"id":   historyID,
+	}
+	historyIDJSON, _ := json.Marshal(historyIDEvent)
+	fmt.Fprintf(c.Response(), "data: %s\n\n", string(historyIDJSON))
+	c.Response().Flush()
+
 	c.Request().Body = io.NopCloser(strings.NewReader(string(body)))
 
 	responseContent, err := im.CompletionRequestHistory(c)
 
 	statusCode := c.Response().Status
 	if statusCode >= 400 {
-		c.Log.Warnw("Not saving history due to error status code", "status_code", statusCode)
+		c.Log.Warnw("Not updating history due to error status code", "status_code", statusCode)
 		if c.Response().Committed {
 			return nil
 		}
@@ -78,60 +136,31 @@ func (im *InferenceManager) CompletionRequestNewHistory(cc echo.Context) error {
 		})
 	}
 
-	messagesJSON, err := json.Marshal(allMessages)
+	allMessagesJSON, err := json.Marshal(allMessages)
 	if err != nil {
-		c.Log.Errorw("Failed to marshal messages", "error", err)
+		c.Log.Errorw("Failed to marshal complete messages", "error", err)
 		return nil
 	}
 
-	var title *string
-	for _, msg := range messages {
-		if msg.Role == "user" && msg.Content != "" {
-			titleStr := msg.Content
-			if len(titleStr) > 32 {
-				titleStr = titleStr[:32]
-			}
-			title = &titleStr
-			break
-		}
-	}
-
-	go func(userID uint64, messagesJSON []byte, title *string, log *zap.SugaredLogger) {
-		historyIDNano, err := nanoid.Generate("0123456789abcdefghijklmnopqrstuvwxyz", 28)
-		if err != nil {
-			log.Errorw("Failed to generate history nanoid", "error", err)
-			return
-		}
-		historyID := "chat-" + historyIDNano
-
-		insertQuery := `
-			INSERT INTO chat_history (
-				user_id,
-				history_id,
-				messages,
-				title,
-				icon
-			) VALUES (?, ?, ?, ?, ?)
+	go func(userID uint64, historyID string, messagesJSON []byte, log *zap.SugaredLogger) {
+		updateQuery := `
+			UPDATE chat_history 
+			SET messages = ?, updated_at = NOW()
+			WHERE history_id = ?
 		`
 
-		_, err = im.WDB.Exec(insertQuery,
-			userID,
-			historyID,
-			string(messagesJSON),
-			title,
-			nil, // icon
-		)
+		_, err := im.WDB.Exec(updateQuery, string(messagesJSON), historyID)
 		if err != nil {
-			log.Errorw("Failed to insert history into database", "error", err)
+			log.Errorw("Failed to update history in database", "error", err, "history_id", historyID)
 			return
 		}
 
-		log.Infow("Chat history created", "history_id", historyID, "user_id", userID)
+		log.Infow("Chat history updated with assistant response", "history_id", historyID, "user_id", userID)
 
 		if err := im.updateUserStreak(userID, log); err != nil {
 			log.Errorw("Failed to update user streak", "error", err, "user_id", userID)
 		}
-	}(c.User.UserID, messagesJSON, title, c.Log)
+	}(c.User.UserID, historyID, allMessagesJSON, c.Log)
 
 	return nil
 }
@@ -219,28 +248,7 @@ func extractContentFromResponse(responseContent string) string {
 	if responseContent == "" {
 		return ""
 	}
-	if content := extractContentFromSingleResponse(responseContent); content != "" {
-		return content
-	}
 	return extractContentFromStreamingResponse(responseContent)
-}
-
-func extractContentFromSingleResponse(responseContent string) string {
-	var response shared.Response
-	if err := json.Unmarshal([]byte(responseContent), &response); err != nil {
-		return ""
-	}
-
-	if len(response.Choices) == 0 {
-		return ""
-	}
-
-	choice := response.Choices[0]
-	if choice.Message == nil {
-		return ""
-	}
-
-	return choice.Message.Content
 }
 
 func extractContentFromStreamingResponse(responseContent string) string {
