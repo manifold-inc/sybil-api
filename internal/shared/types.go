@@ -156,6 +156,7 @@ type ResponseInfo struct {
 	Usage            *Usage
 	ResponseContent  string
 	Cost             ResponseInfoCost
+	StreamChunks     []string
 }
 type ResponseInfoCost struct {
 	InputCredits    uint64

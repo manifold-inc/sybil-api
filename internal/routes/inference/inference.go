@@ -1,102 +1,191 @@
-// Package inference includes all routes and functionality for Sybil Inference
 package inference
 
 import (
 	"context"
-	"database/sql"
+	"encoding/json"
 	"errors"
-	"net"
-	"net/http"
-	"net/url"
+	"fmt"
 	"sync"
 	"time"
 
-	"sybil-api/internal/buckets"
-
-	"github.com/redis/go-redis/v9"
-	"go.uber.org/zap"
+	"sybil-api/internal/shared"
 )
 
-type InferenceManager struct {
-	WDB          *sql.DB
-	RDB          *sql.DB
-	RedisClient  *redis.Client
-	Log          *zap.SugaredLogger
-	Debug        bool
-	httpClients  map[string]*http.Client
-	clientsMutex sync.RWMutex
-	usageCache   *buckets.UsageCache
+type InferenceInput struct {
+	Req       *shared.RequestInfo
+	User      shared.UserMetadata
+	Ctx       context.Context
+	LogFields map[string]string
 }
 
-func NewInferenceManager(wdb *sql.DB, rdb *sql.DB, redisClient *redis.Client, log *zap.SugaredLogger, debug bool) (*InferenceManager, error) {
-	// check if the databases are connected
-	err := wdb.Ping()
-	if err != nil {
-		return nil, errors.New("failed ping to sql db")
-	}
-
-	err = rdb.Ping()
-	if err != nil {
-		return nil, errors.New("failed to ping read replica sql db")
-	}
-
-	err = redisClient.Ping(context.Background()).Err()
-	if err != nil {
-		return nil, errors.New("failed ping to redis db")
-	}
-
-	usageCache := buckets.NewUsageCache(log, wdb)
-
-	return &InferenceManager{
-		WDB:         wdb,
-		RDB:         rdb,
-		RedisClient: redisClient,
-		Log:         log,
-		Debug:       debug,
-		httpClients: make(map[string]*http.Client),
-		usageCache:  usageCache,
-	}, nil
+type InferenceOutput struct {
+	Stream           bool
+	Chunks           []string
+	FinalResponse    []byte
+	ModelID          string
+	TimeToFirstToken time.Duration
+	TotalTime        time.Duration
+	Usage            *shared.Usage
+	Completed        bool
+	Canceled         bool
 }
 
-func (im *InferenceManager) getHTTPClient(modelURL string) *http.Client {
-	parsedURL, err := url.Parse(modelURL)
+func (im *InferenceManager) DoInference(input InferenceInput) (*InferenceOutput, *shared.RequestError) {
+	if input.Req == nil {
+		return nil, &shared.RequestError{
+			StatusCode: 500,
+			Err:        errors.New("request info missing"),
+		}
+	}
+	reqInfo := input.Req
+
+	im.usageCache.AddInFlightToBucket(reqInfo.UserID)
+	mu := sync.Mutex{}
+	mu.Lock()
+	defer func() {
+		im.usageCache.RemoveInFlightFromBucket(reqInfo.UserID)
+		mu.Unlock()
+	}()
+
+	queryLogFields := map[string]string{}
+	if input.LogFields != nil {
+		for k, v := range input.LogFields {
+			queryLogFields[k] = v
+		}
+	}
+	queryLogFields["model"] = reqInfo.Model
+	queryLogFields["stream"] = fmt.Sprintf("%t", reqInfo.Stream)
+
+	queryInput := QueryInput{
+		Ctx:       input.Ctx,
+		Req:       reqInfo,
+		LogFields: queryLogFields,
+	}
+
+	resInfo, qerr := im.QueryModels(queryInput)
+	if qerr != nil {
+		return nil, qerr
+	}
+
+	output := &InferenceOutput{
+		Stream:           reqInfo.Stream,
+		ModelID:          fmt.Sprintf("%d", resInfo.ModelID),
+		TimeToFirstToken: resInfo.TimeToFirstToken,
+		TotalTime:        resInfo.TotalTime,
+		Usage:            resInfo.Usage,
+		Completed:        resInfo.Completed,
+		Canceled:         resInfo.Canceled,
+		FinalResponse:    []byte(resInfo.ResponseContent),
+	}
+
+	if reqInfo.Stream {
+		output.Chunks = append(output.Chunks, resInfo.StreamChunks...)
+	}
+
+	log := im.Log.With(
+		"endpoint", reqInfo.Endpoint,
+		"user_id", input.User.UserID,
+		"request_id", reqInfo.ID,
+	)
+
+	if resInfo.ResponseContent == "" || !resInfo.Completed {
+		log.Errorw("No response or incomplete response from model",
+			"response_content_length", len(resInfo.ResponseContent),
+			"completed", resInfo.Completed,
+			"canceled", resInfo.Canceled,
+			"ttft", resInfo.TimeToFirstToken,
+			"total_time", resInfo.TotalTime)
+		return nil, &shared.RequestError{
+			StatusCode: 500,
+			Err:        errors.New("no response from model"),
+		}
+	}
+
+	go func() {
+		switch true {
+		case !resInfo.Completed:
+			break
+		case reqInfo.Stream:
+			var chunks []map[string]any
+			err := json.Unmarshal([]byte(resInfo.ResponseContent), &chunks)
 	if err != nil {
-		im.Log.Warnw("Failed to parse model URL, using full URL as key", "url", modelURL, "error", err)
-		parsedURL = &url.URL{Host: modelURL}
-	}
-	host := parsedURL.Host
+				log.Errorw(
+					"Failed to unmarshal streaming ResponseContent as JSON array of chunks",
+					"error",
+					err,
+					"raw_response_content",
+					resInfo.ResponseContent,
+				)
+				break
+			}
+			for i := len(chunks) - 1; i >= 0; i-- {
+				usageData, usageFieldExists := chunks[i]["usage"]
+				if usageFieldExists && usageData != nil {
+					if extractedUsage, extractErr := extractUsageData(chunks[i], reqInfo.Endpoint); extractErr == nil {
+						resInfo.Usage = extractedUsage
+						break
+					}
+					log.Warnw(
+						"Failed to extract usage data from a response chunk that had a non-null usage field",
+						"chunk_index",
+						i,
+					)
+					break
+				}
+			}
+		case !reqInfo.Stream:
+			var singleResponse map[string]any
+			err := json.Unmarshal([]byte(resInfo.ResponseContent), &singleResponse)
+			if err != nil {
+				log.Errorw(
+					"Failed to unmarshal non-streaming ResponseContent as single JSON object",
+					"error",
+					err,
+					"raw_response_content",
+					resInfo.ResponseContent,
+				)
+				break
+			}
+			usageData, usageFieldExists := singleResponse["usage"]
+			if usageFieldExists && usageData != nil {
+				if extractedUsage, extractErr := extractUsageData(singleResponse, reqInfo.Endpoint); extractErr == nil {
+					resInfo.Usage = extractedUsage
+					break
+				}
+				log.Warnw(
+					"Failed to extract usage data from single response object that had a non-null usage field",
+				)
+			}
+		default:
+			break
+		}
 
-	im.clientsMutex.RLock()
-	if client, exists := im.httpClients[host]; exists {
-		im.clientsMutex.RUnlock()
-		return client
-	}
-	im.clientsMutex.RUnlock()
+		if resInfo.Usage == nil {
+			resInfo.Usage = &shared.Usage{IsCanceled: resInfo.Canceled}
+		}
 
-	im.clientsMutex.Lock()
-	defer im.clientsMutex.Unlock()
+		totalCredits := shared.CalculateCredits(resInfo.Usage, resInfo.Cost.InputCredits, resInfo.Cost.OutputCredits, resInfo.Cost.CanceledCredits)
 
-	if client, exists := im.httpClients[host]; exists {
-		return client
-	}
+		pqi := &shared.ProcessedQueryInfo{
+			UserID:           reqInfo.UserID,
+			Model:            reqInfo.Model,
+			ModelID:          resInfo.ModelID,
+			Endpoint:         reqInfo.Endpoint,
+			TotalTime:        resInfo.TotalTime,
+			TimeToFirstToken: resInfo.TimeToFirstToken,
+			Usage:            resInfo.Usage,
+			Cost:             resInfo.Cost,
+			TotalCredits:     totalCredits,
+			ResponseContent:  resInfo.ResponseContent,
+			RequestContent:   reqInfo.Body,
+			CreatedAt:        time.Now(),
+			ID:               reqInfo.ID,
+		}
 
-	tr := &http.Transport{
-		Dial: (&net.Dialer{
-			Timeout: 2 * time.Second,
-		}).Dial,
-		TLSHandshakeTimeout: 2 * time.Second,
-		DisableKeepAlives:   false,
-	}
-	client := &http.Client{Transport: tr, Timeout: 10 * time.Minute}
+		mu.Lock()
+		im.usageCache.AddRequestToBucket(reqInfo.UserID, pqi, reqInfo.ID)
+		mu.Unlock()
+	}()
 
-	im.httpClients[host] = client
-	im.Log.Infow("Created new HTTP client for host", "host", host, "full_url", modelURL)
-
-	return client
-}
-
-func (im *InferenceManager) ShutDown() {
-	if im.usageCache != nil {
-		im.usageCache.Shutdown()
-	}
+	return output, nil
 }

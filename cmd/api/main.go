@@ -87,7 +87,7 @@ func main() {
 	inferenceGroup.PATCH("/chat/history/:history_id", inferenceManager.UpdateHistory)
 
 	searchGroup := requiredUser.Group("/search")
-	searchManager, err := search.NewSearchManager(inferenceManager.ProcessOpenaiRequest)
+	searchManager, err := search.NewSearchManager(inferenceManager.HandleInferenceHTTP)
 	if err != nil {
 		panic(err)
 	}

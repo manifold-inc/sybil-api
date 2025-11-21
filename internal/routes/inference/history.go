@@ -1,57 +1,115 @@
 package inference
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
-	"io"
-	"net/http"
 	"strings"
-	"sybil-api/internal/setup"
 	"sybil-api/internal/shared"
 	"time"
 
 	"github.com/aidarkhanov/nanoid"
-	"github.com/labstack/echo/v4"
 	"go.uber.org/zap"
 )
-
-type CreateHistoryRequest struct {
-	Messages []shared.ChatMessage `json:"messages"`
-}
 
 type UpdateHistoryRequest struct {
 	Messages []shared.ChatMessage `json:"messages,omitempty"`
 }
 
-func (im *InferenceManager) CompletionRequestNewHistory(cc echo.Context) error {
-	c := cc.(*setup.Context)
+// NewHistoryInput contains all inputs needed to create a new chat history entry with inference
+type NewHistoryInput struct {
+	Body      []byte
+	User      shared.UserMetadata
+	RequestID string
+	Ctx       context.Context
+	LogFields map[string]string
+}
 
-	body, err := io.ReadAll(c.Request().Body)
-	if err != nil {
-		c.Log.Errorw("Failed to read request body", "error", err.Error())
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "failed to read request body"})
+// NewHistoryOutput contains the results of creating a new history entry and running inference
+type NewHistoryOutput struct {
+	HistoryID     string
+	HistoryIDJSON string   // SSE event for history ID
+	StreamChunks  []string // Raw JSON tokens for streaming
+	Stream        bool
+	FinalResponse []byte
+	Error         *HistoryError
+}
+
+// UpdateHistoryInput contains all inputs needed to update an existing chat history
+type UpdateHistoryInput struct {
+	HistoryID string
+	Messages  []shared.ChatMessage
+	UserID    uint64
+	Ctx       context.Context
+	LogFields map[string]string
+}
+
+// UpdateHistoryOutput contains the result of updating a history entry
+type UpdateHistoryOutput struct {
+	HistoryID string
+	UserID    uint64
+	Message   string
+	Error     *HistoryError
+}
+
+// HistoryError represents a structured error for history operations
+type HistoryError struct {
+	StatusCode int
+	Message    string
+	Err        error
+}
+
+func (im *InferenceManager) completionRequestNewHistoryLogic(input *NewHistoryInput) (*NewHistoryOutput, error) {
+	// Build logger from logfields
+	log := im.Log
+	if input.LogFields != nil {
+		for k, v := range input.LogFields {
+			log = log.With(k, v)
+		}
 	}
 
+	// Parse request body
 	var payload shared.InferenceBody
-	if err := json.Unmarshal(body, &payload); err != nil {
-		c.Log.Errorw("Failed to parse request body", "error", err.Error())
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid JSON format"})
+	if err := json.Unmarshal(input.Body, &payload); err != nil {
+		log.Errorw("Failed to parse request body", "error", err.Error())
+		return &NewHistoryOutput{
+			Error: &HistoryError{
+				StatusCode: 400,
+				Message:    "invalid JSON format",
+				Err:        err,
+			},
+		}, nil
 	}
 
 	if len(payload.Messages) == 0 {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "messages are required"})
+		return &NewHistoryOutput{
+			Error: &HistoryError{
+				StatusCode: 400,
+				Message:    "messages are required",
+				Err:        errors.New("messages are required"),
+			},
+		}, nil
 	}
 
 	messages := payload.Messages
 
+	// Generate history ID
 	historyIDNano, err := nanoid.Generate("0123456789abcdefghijklmnopqrstuvwxyz", 11)
 	if err != nil {
-		c.Log.Errorw("Failed to generate history nanoid", "error", err)
-		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to generate history ID"})
+		log.Errorw("Failed to generate history nanoid", "error", err)
+		return &NewHistoryOutput{
+			Error: &HistoryError{
+				StatusCode: 500,
+				Message:    "failed to generate history ID",
+				Err:        err,
+			},
+		}, nil
 	}
 	historyID := "chat-" + historyIDNano
 
+	// Extract title from first user message
 	var title *string
 	for _, msg := range messages {
 		if msg.Role == "user" && msg.Content != "" {
@@ -64,12 +122,20 @@ func (im *InferenceManager) CompletionRequestNewHistory(cc echo.Context) error {
 		}
 	}
 
+	// Marshal messages for DB insert
 	messagesJSON, err := json.Marshal(messages)
 	if err != nil {
-		c.Log.Errorw("Failed to marshal initial messages", "error", err)
-		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to prepare history"})
+		log.Errorw("Failed to marshal initial messages", "error", err)
+		return &NewHistoryOutput{
+			Error: &HistoryError{
+				StatusCode: 500,
+				Message:    "failed to prepare history",
+				Err:        err,
+			},
+		}, nil
 	}
 
+	// Insert into database
 	insertQuery := `
 		INSERT INTO chat_history (
 			user_id,
@@ -81,184 +147,275 @@ func (im *InferenceManager) CompletionRequestNewHistory(cc echo.Context) error {
 	`
 
 	_, err = im.WDB.Exec(insertQuery,
-		c.User.UserID,
+		input.User.UserID,
 		historyID,
 		string(messagesJSON),
 		title,
 		nil, // icon
 	)
 	if err != nil {
-		c.Log.Errorw("Failed to insert history into database", "error", err)
-		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to create history"})
+		log.Errorw("Failed to insert history into database", "error", err)
+		return &NewHistoryOutput{
+			Error: &HistoryError{
+				StatusCode: 500,
+				Message:    "failed to create history",
+				Err:        err,
+			},
+		}, nil
 	}
 
-	c.Log.Infow("Chat history created", "history_id", historyID, "user_id", c.User.UserID)
+	log.Infow("Chat history created", "history_id", historyID, "user_id", input.User.UserID)
 
-	c.Response().Header().Set("Content-Type", "text/event-stream")
+	// Prepare history ID SSE event
 	historyIDEvent := map[string]any{
 		"type": "history_id",
 		"id":   historyID,
 	}
 	historyIDJSON, _ := json.Marshal(historyIDEvent)
-	fmt.Fprintf(c.Response(), "data: %s\n\n", string(historyIDJSON))
-	c.Response().Flush()
 
-	c.Request().Body = io.NopCloser(strings.NewReader(string(body)))
-
-	responseContent, err := im.CompletionRequestHistory(c)
-
-	statusCode := c.Response().Status
-	if statusCode >= 400 {
-		c.Log.Warnw("Not updating history due to error status code", "status_code", statusCode)
-		if c.Response().Committed {
-			return nil
+	// Build logfields for inference
+	inferenceLogFields := map[string]string{}
+	if input.LogFields != nil {
+		for k, v := range input.LogFields {
+			inferenceLogFields[k] = v
 		}
-		if err != nil {
-			return err
-		}
-		return nil
+	}
+	inferenceLogFields["history_id"] = historyID
+
+	// Run preprocessing
+	reqInfo, preErr := im.Preprocess(PreprocessInput{
+		Body:      input.Body,
+		User:      input.User,
+		Endpoint:  shared.ENDPOINTS.CHAT,
+		RequestID: input.RequestID,
+		LogFields: inferenceLogFields,
+	})
+
+	if preErr != nil {
+		log.Warnw("Preprocessing failed", "error", preErr.Err)
+		return &NewHistoryOutput{
+			HistoryID:     historyID,
+			HistoryIDJSON: string(historyIDJSON),
+			Error: &HistoryError{
+				StatusCode: preErr.StatusCode,
+				Message:    "inference error",
+				Err:        preErr.Err,
+			},
+		}, nil
 	}
 
-	if err != nil {
-		if c.Response().Committed {
-			return nil
+	// Run inference
+	out, reqErr := im.DoInference(InferenceInput{
+		Req:       reqInfo,
+		User:      input.User,
+		Ctx:       input.Ctx,
+		LogFields: inferenceLogFields,
+	})
+
+	if reqErr != nil {
+		if reqErr.StatusCode >= 500 && reqErr.Err != nil {
+			log.Warnw("Inference error", "error", reqErr.Err.Error())
 		}
-		return err
+		return &NewHistoryOutput{
+			HistoryID:     historyID,
+			HistoryIDJSON: string(historyIDJSON),
+			Error: &HistoryError{
+				StatusCode: reqErr.StatusCode,
+				Message:    "inference error",
+				Err:        reqErr.Err,
+			},
+		}, nil
 	}
 
-	var allMessages []shared.ChatMessage
-	allMessages = append(allMessages, messages...)
+	if out == nil {
+		return &NewHistoryOutput{
+			HistoryID:     historyID,
+			HistoryIDJSON: string(historyIDJSON),
+		}, nil
+	}
 
-	if content := extractContentFromResponse(responseContent); content != "" {
+	// Extract assistant message content from inference output
+	var assistantContent string
+	if out.Stream {
+		assistantContent = extractContentFromInferenceOutput(out)
+	} else {
+		assistantContent = extractContentFromFinalResponse(out.FinalResponse)
+	}
+
+	// Update history with assistant response asynchronously
+	if assistantContent != "" {
+		var allMessages []shared.ChatMessage
+		allMessages = append(allMessages, messages...)
 		allMessages = append(allMessages, shared.ChatMessage{
 			Role:    "assistant",
-			Content: content,
+			Content: assistantContent,
 		})
-	}
 
-	allMessagesJSON, err := json.Marshal(allMessages)
-	if err != nil {
-		c.Log.Errorw("Failed to marshal complete messages", "error", err)
-		return nil
-	}
-
-	go func(userID uint64, historyID string, messagesJSON []byte, log *zap.SugaredLogger) {
-		updateQuery := `
+		allMessagesJSON, err := json.Marshal(allMessages)
+		if err != nil {
+			log.Errorw("Failed to marshal complete messages", "error", err)
+		} else {
+			go func(userID uint64, historyID string, messagesJSON []byte, log *zap.SugaredLogger) {
+				updateQuery := `
 			UPDATE chat_history 
 			SET messages = ?, updated_at = NOW()
 			WHERE history_id = ?
 		`
 
-		_, err := im.WDB.Exec(updateQuery, string(messagesJSON), historyID)
-		if err != nil {
-			log.Errorw("Failed to update history in database", "error", err, "history_id", historyID)
-			return
+				_, err := im.WDB.Exec(updateQuery, string(messagesJSON), historyID)
+				if err != nil {
+					log.Errorw("Failed to update history in database", "error", err, "history_id", historyID)
+					return
+				}
+
+				log.Infow("Chat history updated with assistant response", "history_id", historyID, "user_id", userID)
+
+				if err := im.updateUserStreak(userID, log); err != nil {
+					log.Errorw("Failed to update user streak", "error", err, "user_id", userID)
+				}
+			}(input.User.UserID, historyID, allMessagesJSON, log)
 		}
+	}
 
-		log.Infow("Chat history updated with assistant response", "history_id", historyID, "user_id", userID)
-
-		if err := im.updateUserStreak(userID, log); err != nil {
-			log.Errorw("Failed to update user streak", "error", err, "user_id", userID)
-		}
-	}(c.User.UserID, historyID, allMessagesJSON, c.Log)
-
-	return nil
+	return &NewHistoryOutput{
+		HistoryID:     historyID,
+		HistoryIDJSON: string(historyIDJSON),
+		StreamChunks:  out.Chunks,
+		Stream:        out.Stream,
+		FinalResponse: out.FinalResponse,
+	}, nil
 }
 
-func (im *InferenceManager) UpdateHistory(cc echo.Context) error {
-	c := cc.(*setup.Context)
+func (im *InferenceManager) updateHistoryLogic(input *UpdateHistoryInput) (*UpdateHistoryOutput, error) {
+	// Build logger from logfields
+	log := im.Log
+	if input.LogFields != nil {
+		for k, v := range input.LogFields {
+			log = log.With(k, v)
+		}
+	}
 
-	historyIDStr := c.Param("history_id")
-
-	var userID uint64
+	// Check if history exists and get owner user ID
+	var ownerUserID uint64
 	checkQuery := `SELECT user_id FROM chat_history WHERE history_id = ?`
-	err := im.RDB.QueryRowContext(c.Request().Context(), checkQuery, historyIDStr).Scan(&userID)
+	err := im.RDB.QueryRowContext(input.Ctx, checkQuery, input.HistoryID).Scan(&ownerUserID)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			c.Log.Errorw("History not found", "error", err.Error(), "history_id", historyIDStr)
-			return c.JSON(http.StatusNotFound, map[string]string{"error": "history not found"})
+			log.Errorw("History not found", "error", err.Error(), "history_id", input.HistoryID)
+			return &UpdateHistoryOutput{
+				Error: &HistoryError{
+					StatusCode: 404,
+					Message:    "history not found",
+					Err:        err,
+				},
+			}, nil
 		}
-		c.Log.Errorw("Failed to check history", "error", err.Error(), "history_id", historyIDStr)
-		return c.JSON(http.StatusInternalServerError, shared.ErrInternalServerError)
+		log.Errorw("Failed to check history", "error", err.Error(), "history_id", input.HistoryID)
+		return &UpdateHistoryOutput{
+			Error: &HistoryError{
+				StatusCode: 500,
+				Message:    "internal server error",
+				Err:        err,
+			},
+		}, nil
 	}
 
-	if userID != c.User.UserID {
-		c.Log.Errorw("Unauthorized access to history", "history_id", historyIDStr, "user_id", c.User.UserID, "owner_id", userID)
-		return c.JSON(http.StatusForbidden, map[string]string{"error": "unauthorized"})
+	// Check authorization
+	if ownerUserID != input.UserID {
+		log.Errorw("Unauthorized access to history", "history_id", input.HistoryID, "user_id", input.UserID, "owner_id", ownerUserID)
+		return &UpdateHistoryOutput{
+			Error: &HistoryError{
+				StatusCode: 403,
+				Message:    "unauthorized",
+				Err:        errors.New("unauthorized access"),
+			},
+		}, nil
 	}
 
-	var req UpdateHistoryRequest
-	body, err := io.ReadAll(c.Request().Body)
+	log.Infow("Updating chat history",
+		"history_id", input.HistoryID,
+		"user_id", input.UserID)
+
+	// Validate messages
+	if len(input.Messages) == 0 {
+		return &UpdateHistoryOutput{
+			Error: &HistoryError{
+				StatusCode: 400,
+				Message:    "messages cannot be empty",
+				Err:        errors.New("messages cannot be empty"),
+			},
+		}, nil
+	}
+
+	// Marshal messages
+	messagesJSON, err := json.Marshal(input.Messages)
 	if err != nil {
-		c.Log.Errorw("Failed to read request body", "error", err.Error())
-		return c.JSON(http.StatusInternalServerError, shared.ErrInternalServerError)
+		log.Errorw("Failed to marshal messages", "error", err)
+		return &UpdateHistoryOutput{
+			Error: &HistoryError{
+				StatusCode: 500,
+				Message:    "internal server error",
+				Err:        err,
+			},
+		}, nil
 	}
 
-	if err := json.Unmarshal(body, &req); err != nil {
-		c.Log.Errorw("Failed to unmarshal request body", "error", err.Error())
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid JSON format"})
-	}
-
-	c.Log.Infow("Updating chat history",
-		"history_id", historyIDStr,
-		"user_id", c.User.UserID)
-
-	if len(req.Messages) == 0 {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "messages cannot be empty"})
-	}
-
-	messagesJSON, err := json.Marshal(req.Messages)
-	if err != nil {
-		c.Log.Errorw("Failed to marshal messages", "error", err)
-		return c.JSON(http.StatusInternalServerError, shared.ErrInternalServerError)
-	}
-
+	// Update database
 	updateQuery := `
 		UPDATE chat_history 
 		SET messages = ?, updated_at = NOW()
 		WHERE history_id = ?
 	`
 
-	_, err = im.WDB.ExecContext(c.Request().Context(), updateQuery, string(messagesJSON), historyIDStr)
+	_, err = im.WDB.ExecContext(input.Ctx, updateQuery, string(messagesJSON), input.HistoryID)
 	if err != nil {
-		c.Log.Errorw("Failed to update history in database",
+		log.Errorw("Failed to update history in database",
 			"error", err.Error(),
-			"history_id", historyIDStr)
-		return c.JSON(http.StatusInternalServerError, shared.ErrInternalServerError)
+			"history_id", input.HistoryID)
+		return &UpdateHistoryOutput{
+			Error: &HistoryError{
+				StatusCode: 500,
+				Message:    "internal server error",
+				Err:        err,
+			},
+		}, nil
 	}
 
-	c.Log.Infow("Successfully updated chat history",
-		"history_id", historyIDStr,
-		"user_id", c.User.UserID)
+	log.Infow("Successfully updated chat history",
+		"history_id", input.HistoryID,
+		"user_id", input.UserID)
 
+	// Update user streak asynchronously
 	go func(userID uint64, log *zap.SugaredLogger) {
 		if err := im.updateUserStreak(userID, log); err != nil {
 			log.Errorw("Failed to update user streak", "error", err, "user_id", userID)
 		}
-	}(c.User.UserID, c.Log)
+	}(input.UserID, log)
 
-	return c.JSON(http.StatusOK, map[string]any{
-		"message": "History updated successfully",
-		"id":      historyIDStr,
-		"user_id": c.User.UserID,
-	})
+	return &UpdateHistoryOutput{
+		HistoryID: input.HistoryID,
+		UserID:    input.UserID,
+		Message:   "History updated successfully",
+	}, nil
 }
 
-func extractContentFromResponse(responseContent string) string {
-	if responseContent == "" {
-		return ""
-	}
-	return extractContentFromStreamingResponse(responseContent)
-}
-
-func extractContentFromStreamingResponse(responseContent string) string {
-	var chunks []shared.Response
-	if err := json.Unmarshal([]byte(responseContent), &chunks); err != nil {
+// extractContentFromInferenceOutput extracts assistant content from streaming inference output
+func extractContentFromInferenceOutput(out *InferenceOutput) string {
+	if out == nil || len(out.Chunks) == 0 {
 		return ""
 	}
 
 	var fullContent strings.Builder
-	for _, chunk := range chunks {
+	for _, chunkJSON := range out.Chunks {
+		if chunkJSON == "[DONE]" {
+			continue
+		}
+
+		var chunk shared.Response
+		if err := json.Unmarshal([]byte(chunkJSON), &chunk); err != nil {
+			continue
+		}
+
 		if len(chunk.Choices) == 0 {
 			continue
 		}
@@ -274,6 +431,29 @@ func extractContentFromStreamingResponse(responseContent string) string {
 	}
 
 	return fullContent.String()
+}
+
+// extractContentFromFinalResponse extracts assistant content from non-streaming response
+func extractContentFromFinalResponse(finalResponse []byte) string {
+	if len(finalResponse) == 0 {
+		return ""
+	}
+
+	var response shared.Response
+	if err := json.Unmarshal(finalResponse, &response); err != nil {
+		return ""
+	}
+
+	if len(response.Choices) == 0 {
+		return ""
+	}
+
+	choice := response.Choices[0]
+	if choice.Message != nil {
+		return choice.Message.Content
+	}
+
+	return ""
 }
 
 func (im *InferenceManager) updateUserStreak(userID uint64, log *zap.SugaredLogger) error {
