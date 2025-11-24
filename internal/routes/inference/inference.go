@@ -12,15 +12,15 @@ import (
 )
 
 type InferenceInput struct {
-	Req       *shared.RequestInfo
-	User      shared.UserMetadata
-	Ctx       context.Context
-	LogFields map[string]string
+	Req          *shared.RequestInfo
+	User         shared.UserMetadata
+	Ctx          context.Context
+	LogFields    map[string]string
+	StreamWriter func(token string) error // callback for real-time streaming
 }
 
 type InferenceOutput struct {
 	Stream           bool
-	Chunks           []string
 	FinalResponse    []byte
 	ModelID          string
 	TimeToFirstToken time.Duration
@@ -57,9 +57,10 @@ func (im *InferenceManager) DoInference(input InferenceInput) (*InferenceOutput,
 	queryLogFields["stream"] = fmt.Sprintf("%t", reqInfo.Stream)
 
 	queryInput := QueryInput{
-		Ctx:       input.Ctx,
-		Req:       reqInfo,
-		LogFields: queryLogFields,
+		Ctx:          input.Ctx,
+		Req:          reqInfo,
+		LogFields:    queryLogFields,
+		StreamWriter: input.StreamWriter, // Pass the callback through
 	}
 
 	resInfo, qerr := im.QueryModels(queryInput)
@@ -76,10 +77,6 @@ func (im *InferenceManager) DoInference(input InferenceInput) (*InferenceOutput,
 		Completed:        resInfo.Completed,
 		Canceled:         resInfo.Canceled,
 		FinalResponse:    []byte(resInfo.ResponseContent),
-	}
-
-	if reqInfo.Stream {
-		output.Chunks = append(output.Chunks, resInfo.StreamChunks...)
 	}
 
 	log := im.Log.With(

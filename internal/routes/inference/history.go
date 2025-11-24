@@ -20,18 +20,18 @@ type UpdateHistoryRequest struct {
 
 // NewHistoryInput contains all inputs needed to create a new chat history entry with inference
 type NewHistoryInput struct {
-	Body      []byte
-	User      shared.UserMetadata
-	RequestID string
-	Ctx       context.Context
-	LogFields map[string]string
+	Body         []byte
+	User         shared.UserMetadata
+	RequestID    string
+	Ctx          context.Context
+	LogFields    map[string]string
+	StreamWriter func(token string) error // Optional callback for real-time streaming
 }
 
 // NewHistoryOutput contains the results of creating a new history entry and running inference
 type NewHistoryOutput struct {
 	HistoryID     string
-	HistoryIDJSON string   // SSE event for history ID
-	StreamChunks  []string // Raw JSON tokens for streaming
+	HistoryIDJSON string // SSE event for history ID
 	Stream        bool
 	FinalResponse []byte
 	Error         *HistoryError
@@ -204,12 +204,13 @@ func (im *InferenceManager) completionRequestNewHistoryLogic(input *NewHistoryIn
 		}, nil
 	}
 
-	// Run inference
+	// Run inference with streaming callback
 	out, reqErr := im.DoInference(InferenceInput{
-		Req:       reqInfo,
-		User:      input.User,
-		Ctx:       input.Ctx,
-		LogFields: inferenceLogFields,
+		Req:          reqInfo,
+		User:         input.User,
+		Ctx:          input.Ctx,
+		LogFields:    inferenceLogFields,
+		StreamWriter: input.StreamWriter, // Pass through the streaming callback
 	})
 
 	if reqErr != nil {
@@ -280,7 +281,6 @@ func (im *InferenceManager) completionRequestNewHistoryLogic(input *NewHistoryIn
 	return &NewHistoryOutput{
 		HistoryID:     historyID,
 		HistoryIDJSON: string(historyIDJSON),
-		StreamChunks:  out.Chunks,
 		Stream:        out.Stream,
 		FinalResponse: out.FinalResponse,
 	}, nil
@@ -399,20 +399,22 @@ func (im *InferenceManager) updateHistoryLogic(input *UpdateHistoryInput) (*Upda
 	}, nil
 }
 
-// extractContentFromInferenceOutput extracts assistant content from streaming inference output
+// extractContentFromInferenceOutput extracts assistant content from inference output
 func extractContentFromInferenceOutput(out *InferenceOutput) string {
-	if out == nil || len(out.Chunks) == 0 {
+	if out == nil || len(out.FinalResponse) == 0 {
+		return ""
+	}
+
+	// FinalResponse contains the marshaled array of response chunks
+	var chunks []json.RawMessage
+	if err := json.Unmarshal(out.FinalResponse, &chunks); err != nil {
 		return ""
 	}
 
 	var fullContent strings.Builder
-	for _, chunkJSON := range out.Chunks {
-		if chunkJSON == "[DONE]" {
-			continue
-		}
-
+	for _, chunkData := range chunks {
 		var chunk shared.Response
-		if err := json.Unmarshal([]byte(chunkJSON), &chunk); err != nil {
+		if err := json.Unmarshal(chunkData, &chunk); err != nil {
 			continue
 		}
 

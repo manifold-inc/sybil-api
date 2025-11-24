@@ -44,38 +44,52 @@ func (im *InferenceManager) CompletionRequestNewHistory(cc echo.Context) error {
 
 	logfields := buildLogFields(c, shared.ENDPOINTS.CHAT, nil)
 
-	// Call pure logic function (note: renamed internal function to avoid conflict)
+	// Set up SSE response headers early
+	c.Response().Header().Set("Content-Type", "text/event-stream")
+	c.Response().Header().Set("Cache-Control", "no-cache")
+	c.Response().Header().Set("Connection", "keep-alive")
+	c.Response().WriteHeader(http.StatusOK)
+
+	// Create streaming callback for real-time token delivery
+	streamCallback := func(token string) error {
+		if c.Request().Context().Err() != nil {
+			return c.Request().Context().Err()
+		}
+		_, err := fmt.Fprintf(c.Response(), "%s\n\n", token)
+		if err != nil {
+			return err
+		}
+		c.Response().Flush()
+		return nil
+	}
+
+	// Call pure logic function with streaming callback
 	output, err := im.completionRequestNewHistoryLogic(&NewHistoryInput{
-		Body:      body,
-		User:      *c.User,
-		RequestID: c.Reqid,
-		Ctx:       c.Request().Context(),
-		LogFields: logfields,
+		Body:         body,
+		User:         *c.User,
+		RequestID:    c.Reqid,
+		Ctx:          c.Request().Context(),
+		LogFields:    logfields,
+		StreamWriter: streamCallback, // Pass callback for real-time streaming
 	})
 
 	if err != nil {
 		c.Log.Errorw("History creation failed", "error", err)
-		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "internal server error"})
+		return nil // Already sent headers, can't send JSON error
 	}
 
 	// Handle errors from logic layer
 	if output.Error != nil {
-		return c.JSON(output.Error.StatusCode, map[string]string{"error": output.Error.Message})
+		c.Log.Errorw("History logic error", "error", output.Error.Message)
+		return nil // Already sent headers, can't send JSON error
 	}
 
-	// Set up SSE response
-	c.Response().Header().Set("Content-Type", "text/event-stream")
-	c.Response().WriteHeader(http.StatusOK)
-
-	// Write history ID event
+	// Write history ID event first
 	fmt.Fprintf(c.Response(), "data: %s\n\n", output.HistoryIDJSON)
 	c.Response().Flush()
 
-	// Write inference chunks or final response
-	if output.Stream {
-		writeSSEChunks(c, output.StreamChunks)
-	} else if len(output.FinalResponse) > 0 {
-		// For non-streaming, still need to write as SSE since we already set the header
+	// For non-streaming, write final response as SSE
+	if !output.Stream && len(output.FinalResponse) > 0 {
 		fmt.Fprintf(c.Response(), "data: %s\n\n", string(output.FinalResponse))
 		c.Response().Flush()
 	}
@@ -151,21 +165,4 @@ func buildLogFields(c *setup.Context, endpoint string, extras map[string]string)
 		fields[k] = v
 	}
 	return fields
-}
-
-func writeSSEChunks(c *setup.Context, chunks []string) {
-	writer := c.Response().Writer
-	flusher, _ := writer.(http.Flusher)
-
-	streamChunks := chunks
-	if len(streamChunks) == 0 {
-		streamChunks = []string{""}
-	}
-
-	for _, chunk := range streamChunks {
-		fmt.Fprintf(writer, "data: %s\n\n", chunk)
-		if flusher != nil {
-			flusher.Flush()
-		}
-	}
 }

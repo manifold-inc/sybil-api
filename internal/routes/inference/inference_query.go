@@ -18,9 +18,10 @@ import (
 )
 
 type QueryInput struct {
-	Ctx       context.Context
-	Req       *shared.RequestInfo
-	LogFields map[string]string
+	Ctx          context.Context
+	Req          *shared.RequestInfo
+	LogFields    map[string]string
+	StreamWriter func(token string) error // Optional callback for real-time streaming
 }
 
 // QueryModels forwards the request to the appropriate model
@@ -160,7 +161,6 @@ func (im *InferenceManager) QueryModels(input QueryInput) (*shared.ResponseInfo,
 	var ttftRecorded bool
 	hasDone := false
 
-	var streamChunks []string
 	if input.Req.Stream && !canceled { // Check if the request is streaming
 		reader := bufio.NewScanner(res.Body)
 		var currentEvent string
@@ -177,57 +177,63 @@ func (im *InferenceManager) QueryModels(input QueryInput) (*shared.ResponseInfo,
 					newlog.Warnw("Client disconnected during streaming, continuing to read from inference engine")
 					clientDisconnected = true
 				}
-			default:
-				token := reader.Text()
+		default:
+			token := reader.Text()
 
-				// Skip empty lines
-				if token == "" {
-					continue
+			// Skip empty lines
+			if token == "" {
+				continue
+			}
+
+			// Stream token to client immediately via callback (if provided and client still connected)
+			if input.StreamWriter != nil && !clientDisconnected {
+				if err := input.StreamWriter(token); err != nil {
+					newlog.Warnw("Stream writer returned error, client likely disconnected", "error", err)
+					clientDisconnected = true
 				}
+			}
 
-				// Handle Responses API event format
-				if strings.HasPrefix(token, "event: ") {
-					currentEvent = strings.TrimPrefix(token, "event: ")
-					// Check for completion event
-					if currentEvent == "response.completed" {
-						hasDone = true
-					}
-					continue
-				}
-
-				if !strings.HasPrefix(token, "data: ") {
-					continue
-				}
-
-				if !ttftRecorded {
-					ttft = time.Since(input.Req.StartTime)
-					ttftRecorded = true
-					timer.Stop()
-					// Time from HTTP completion to first token = actual model processing/queue time
-					modelProcessingTime := time.Since(httpCompletedAt)
-					newlog.Infow("First token received",
-						"ttft_ms", ttft.Milliseconds(),
-						"preprocessing_ms", preprocessingTime.Milliseconds(),
-						"http_duration_ms", httpDuration.Milliseconds(),
-						"model_processing_ms", modelProcessingTime.Milliseconds())
-				}
-
-				jsonData := strings.TrimPrefix(token, "data: ")
-
-				if jsonData == "[DONE]" {
+			// Handle Responses API event format
+			if strings.HasPrefix(token, "event: ") {
+				currentEvent = strings.TrimPrefix(token, "event: ")
+				// Check for completion event
+				if currentEvent == "response.completed" {
 					hasDone = true
-					streamChunks = append(streamChunks, jsonData)
-					break scanner
 				}
+				continue
+			}
 
-				var rawMessage json.RawMessage
-				err := json.Unmarshal([]byte(jsonData), &rawMessage)
-				if err != nil {
-					newlog.Warnw("failed unmarshaling streamed data", "error", err, "token", token)
-					continue
-				}
-				responses = append(responses, rawMessage)
-				streamChunks = append(streamChunks, jsonData)
+			if !strings.HasPrefix(token, "data: ") {
+				continue
+			}
+
+			if !ttftRecorded {
+				ttft = time.Since(input.Req.StartTime)
+				ttftRecorded = true
+				timer.Stop()
+				// Time from HTTP completion to first token = actual model processing/queue time
+				modelProcessingTime := time.Since(httpCompletedAt)
+				newlog.Infow("First token received",
+					"ttft_ms", ttft.Milliseconds(),
+					"preprocessing_ms", preprocessingTime.Milliseconds(),
+					"http_duration_ms", httpDuration.Milliseconds(),
+					"model_processing_ms", modelProcessingTime.Milliseconds())
+			}
+
+			jsonData := strings.TrimPrefix(token, "data: ")
+
+			if jsonData == "[DONE]" {
+				hasDone = true
+				break scanner
+			}
+
+			var rawMessage json.RawMessage
+			err := json.Unmarshal([]byte(jsonData), &rawMessage)
+			if err != nil {
+				newlog.Warnw("failed unmarshaling streamed data", "error", err, "token", token)
+				continue
+			}
+			responses = append(responses, rawMessage)
 			}
 		}
 
@@ -289,7 +295,6 @@ func (im *InferenceManager) QueryModels(input QueryInput) (*shared.ResponseInfo,
 			OutputCredits:   modelMetadata.OCPT,
 			CanceledCredits: modelMetadata.CRC,
 		},
-		StreamChunks: streamChunks,
 	}
 
 	// Log final request state
