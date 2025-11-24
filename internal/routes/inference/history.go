@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"strings"
 	"sybil-api/internal/shared"
 	"time"
@@ -176,9 +177,7 @@ func (im *InferenceManager) completionRequestNewHistoryLogic(input *NewHistoryIn
 	// Build logfields for inference
 	inferenceLogFields := map[string]string{}
 	if input.LogFields != nil {
-		for k, v := range input.LogFields {
-			inferenceLogFields[k] = v
-		}
+		maps.Copy(inferenceLogFields, input.LogFields)
 	}
 	inferenceLogFields["history_id"] = historyID
 

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 
 	"sybil-api/internal/setup"
@@ -72,7 +73,6 @@ func (im *InferenceManager) CompletionRequestNewHistory(cc echo.Context) error {
 		LogFields:    logfields,
 		StreamWriter: streamCallback, // Pass callback for real-time streaming
 	})
-
 	if err != nil {
 		c.Log.Errorw("History creation failed", "error", err)
 		return nil // Already sent headers, can't send JSON error
@@ -85,12 +85,12 @@ func (im *InferenceManager) CompletionRequestNewHistory(cc echo.Context) error {
 	}
 
 	// Write history ID event first
-	fmt.Fprintf(c.Response(), "data: %s\n\n", output.HistoryIDJSON)
+	_, _ = fmt.Fprintf(c.Response(), "data: %s\n\n", output.HistoryIDJSON)
 	c.Response().Flush()
 
 	// For non-streaming, write final response as SSE
 	if !output.Stream && len(output.FinalResponse) > 0 {
-		fmt.Fprintf(c.Response(), "data: %s\n\n", string(output.FinalResponse))
+		_, _ = fmt.Fprintf(c.Response(), "data: %s\n\n", string(output.FinalResponse))
 		c.Response().Flush()
 	}
 
@@ -127,7 +127,6 @@ func (im *InferenceManager) UpdateHistory(cc echo.Context) error {
 		Ctx:       c.Request().Context(),
 		LogFields: logfields,
 	})
-
 	if err != nil {
 		c.Log.Errorw("History update failed", "error", err)
 		return c.JSON(http.StatusInternalServerError, shared.ErrInternalServerError)
@@ -161,8 +160,6 @@ func buildLogFields(c *setup.Context, endpoint string, extras map[string]string)
 		"user_id":    fmt.Sprintf("%d", c.User.UserID),
 		"request_id": c.Reqid,
 	}
-	for k, v := range extras {
-		fields[k] = v
-	}
+	maps.Copy(fields, extras)
 	return fields
 }

@@ -1,3 +1,4 @@
+// Package inference
 package inference
 
 import (
@@ -5,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"sync"
 	"time"
 
@@ -49,9 +51,7 @@ func (im *InferenceManager) DoInference(input InferenceInput) (*InferenceOutput,
 
 	queryLogFields := map[string]string{}
 	if input.LogFields != nil {
-		for k, v := range input.LogFields {
-			queryLogFields[k] = v
-		}
+		maps.Copy(queryLogFields, input.LogFields)
 	}
 	queryLogFields["model"] = reqInfo.Model
 	queryLogFields["stream"] = fmt.Sprintf("%t", reqInfo.Stream)
@@ -105,7 +105,7 @@ func (im *InferenceManager) DoInference(input InferenceInput) (*InferenceOutput,
 		case reqInfo.Stream:
 			var chunks []map[string]any
 			err := json.Unmarshal([]byte(resInfo.ResponseContent), &chunks)
-	if err != nil {
+			if err != nil {
 				log.Errorw(
 					"Failed to unmarshal streaming ResponseContent as JSON array of chunks",
 					"error",

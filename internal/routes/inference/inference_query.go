@@ -177,63 +177,63 @@ func (im *InferenceManager) QueryModels(input QueryInput) (*shared.ResponseInfo,
 					newlog.Warnw("Client disconnected during streaming, continuing to read from inference engine")
 					clientDisconnected = true
 				}
-		default:
-			token := reader.Text()
+			default:
+				token := reader.Text()
 
-			// Skip empty lines
-			if token == "" {
-				continue
-			}
-
-			// Stream token to client immediately via callback (if provided and client still connected)
-			if input.StreamWriter != nil && !clientDisconnected {
-				if err := input.StreamWriter(token); err != nil {
-					newlog.Warnw("Stream writer returned error, client likely disconnected", "error", err)
-					clientDisconnected = true
+				// Skip empty lines
+				if token == "" {
+					continue
 				}
-			}
 
-			// Handle Responses API event format
-			if strings.HasPrefix(token, "event: ") {
-				currentEvent = strings.TrimPrefix(token, "event: ")
-				// Check for completion event
-				if currentEvent == "response.completed" {
+				// Stream token to client immediately via callback (if provided and client still connected)
+				if input.StreamWriter != nil && !clientDisconnected {
+					if err := input.StreamWriter(token); err != nil {
+						newlog.Warnw("Stream writer returned error, client likely disconnected", "error", err)
+						clientDisconnected = true
+					}
+				}
+
+				// Handle Responses API event format
+				if ce, found := strings.CutPrefix(token, "event: "); found {
+					currentEvent = ce
+					// Check for completion event
+					if currentEvent == "response.completed" {
+						hasDone = true
+					}
+					continue
+				}
+
+				if !strings.HasPrefix(token, "data: ") {
+					continue
+				}
+
+				if !ttftRecorded {
+					ttft = time.Since(input.Req.StartTime)
+					ttftRecorded = true
+					timer.Stop()
+					// Time from HTTP completion to first token = actual model processing/queue time
+					modelProcessingTime := time.Since(httpCompletedAt)
+					newlog.Infow("First token received",
+						"ttft_ms", ttft.Milliseconds(),
+						"preprocessing_ms", preprocessingTime.Milliseconds(),
+						"http_duration_ms", httpDuration.Milliseconds(),
+						"model_processing_ms", modelProcessingTime.Milliseconds())
+				}
+
+				jsonData := strings.TrimPrefix(token, "data: ")
+
+				if jsonData == "[DONE]" {
 					hasDone = true
+					break scanner
 				}
-				continue
-			}
 
-			if !strings.HasPrefix(token, "data: ") {
-				continue
-			}
-
-			if !ttftRecorded {
-				ttft = time.Since(input.Req.StartTime)
-				ttftRecorded = true
-				timer.Stop()
-				// Time from HTTP completion to first token = actual model processing/queue time
-				modelProcessingTime := time.Since(httpCompletedAt)
-				newlog.Infow("First token received",
-					"ttft_ms", ttft.Milliseconds(),
-					"preprocessing_ms", preprocessingTime.Milliseconds(),
-					"http_duration_ms", httpDuration.Milliseconds(),
-					"model_processing_ms", modelProcessingTime.Milliseconds())
-			}
-
-			jsonData := strings.TrimPrefix(token, "data: ")
-
-			if jsonData == "[DONE]" {
-				hasDone = true
-				break scanner
-			}
-
-			var rawMessage json.RawMessage
-			err := json.Unmarshal([]byte(jsonData), &rawMessage)
-			if err != nil {
-				newlog.Warnw("failed unmarshaling streamed data", "error", err, "token", token)
-				continue
-			}
-			responses = append(responses, rawMessage)
+				var rawMessage json.RawMessage
+				err := json.Unmarshal([]byte(jsonData), &rawMessage)
+				if err != nil {
+					newlog.Warnw("failed unmarshaling streamed data", "error", err, "token", token)
+					continue
+				}
+				responses = append(responses, rawMessage)
 			}
 		}
 
@@ -306,4 +306,3 @@ func (im *InferenceManager) QueryModels(input QueryInput) (*shared.ResponseInfo,
 
 	return resInfo, nil
 }
-
