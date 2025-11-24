@@ -5,9 +5,10 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"time"
+
 	"sybil-api/internal/setup"
 	"sybil-api/internal/shared"
-	"time"
 
 	"github.com/labstack/echo/v4"
 )
@@ -68,7 +69,21 @@ func (im *InferenceManager) Models(cc echo.Context) error {
 	ctx, cancel := context.WithTimeout(c.Request().Context(), 5*time.Second)
 	defer cancel()
 
-	models, err := fetchModels(ctx, im.RDB, c.User, c)
+	// Build log fields for structured logging
+	logfields := map[string]string{
+		"endpoint": "models",
+	}
+	if c.User != nil {
+		logfields["user_id"] = fmt.Sprintf("%d", c.User.UserID)
+	}
+
+	// Call business logic with explicit parameters
+	var userID *uint64
+	if c.User != nil {
+		userID = &c.User.UserID
+	}
+
+	models, err := im.fetchModels(ctx, userID, logfields)
 	if err != nil {
 		c.Log.Errorw("Failed to get models", "error", err.Error())
 		return cc.String(500, "Failed to get models")
@@ -79,36 +94,49 @@ func (im *InferenceManager) Models(cc echo.Context) error {
 	})
 }
 
-func fetchModels(ctx context.Context, db *sql.DB, user *shared.UserMetadata, c *setup.Context) ([]Model, error) {
-	baseQuery := `
-		`
-	switch true {
-	case user != nil:
-		if models, err := queryModels(ctx, db, c, baseQuery+`
-				SELECT name, DATE_FORMAT(created_at, '%Y-%m-%d %H:%i:%s') as created,
-					icpt, ocpt, crc, metadata, modality, supported_endpoints
-				FROM model 
-				WHERE enabled = true AND allowed_user_id = ?
-				ORDER BY name ASC`,
-			user.UserID); err == nil && len(models) > 0 {
-			return models, nil
-		} else if err != nil {
-			c.Log.Warnw("Error querying user-specific models, falling back to public", "error", err.Error())
-		}
-		fallthrough
-	default:
-		// public models
-		return queryModels(ctx, db, c, `
+// fetchModels retrieves models from the database based on user permissions
+// It first tries to fetch user-specific models, then falls back to public models
+func (im *InferenceManager) fetchModels(ctx context.Context, userID *uint64, logfields map[string]string) ([]Model, error) {
+	// Build logger with structured fields
+	log := im.Log
+	for k, v := range logfields {
+		log = log.With(k, v)
+	}
+
+	// Try to fetch user-specific models first if user is authenticated
+	if userID != nil {
+		userModels, err := im.queryModels(ctx, logfields, `
 			SELECT name, DATE_FORMAT(created_at, '%Y-%m-%d %H:%i:%s') as created,
 				icpt, ocpt, crc, metadata, modality, supported_endpoints
 			FROM model 
-			WHERE enabled = true AND allowed_user_id is NULL
-			ORDER BY name ASC`)
+			WHERE enabled = true AND allowed_user_id = ?
+			ORDER BY name ASC`, *userID)
+
+		if err != nil {
+			log.Warnw("Error querying user-specific models, falling back to public", "error", err.Error())
+		} else if len(userModels) > 0 {
+			return userModels, nil
+		}
 	}
+
+	// Fetch public models (fallback or default)
+	return im.queryModels(ctx, logfields, `
+		SELECT name, DATE_FORMAT(created_at, '%Y-%m-%d %H:%i:%s') as created,
+			icpt, ocpt, crc, metadata, modality, supported_endpoints
+		FROM model 
+		WHERE enabled = true AND allowed_user_id is NULL
+		ORDER BY name ASC`)
 }
 
-func queryModels(ctx context.Context, db *sql.DB, c *setup.Context, query string, args ...any) ([]Model, error) {
-	rows, err := db.QueryContext(ctx, query, args...)
+// queryModels executes a database query and scans the results into Model structs
+func (im *InferenceManager) queryModels(ctx context.Context, logfields map[string]string, query string, args ...any) ([]Model, error) {
+	// Build logger with structured fields
+	log := im.Log
+	for k, v := range logfields {
+		log = log.With(k, v)
+	}
+
+	rows, err := im.RDB.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -118,14 +146,14 @@ func queryModels(ctx context.Context, db *sql.DB, c *setup.Context, query string
 	for rows.Next() {
 		model, err := scanModel(rows)
 		if err != nil {
-			c.Log.Warnw("Failed to scan model row", "error", err.Error())
+			log.Warnw("Failed to scan model row", "error", err.Error())
 			continue
 		}
 		models = append(models, model)
 	}
 
 	if err := rows.Err(); err != nil {
-		c.Log.Errorw("Error iterating over rows", "error", err.Error())
+		log.Errorw("Error iterating over rows", "error", err.Error())
 		return nil, err
 	}
 
