@@ -69,7 +69,6 @@ func (im *InferenceManager) Models(cc echo.Context) error {
 	ctx, cancel := context.WithTimeout(c.Request().Context(), 5*time.Second)
 	defer cancel()
 
-	// Build log fields for structured logging
 	logfields := map[string]string{
 		"endpoint": "models",
 	}
@@ -77,7 +76,6 @@ func (im *InferenceManager) Models(cc echo.Context) error {
 		logfields["user_id"] = fmt.Sprintf("%d", c.User.UserID)
 	}
 
-	// Call business logic with explicit parameters
 	var userID *uint64
 	if c.User != nil {
 		userID = &c.User.UserID
@@ -94,16 +92,9 @@ func (im *InferenceManager) Models(cc echo.Context) error {
 	})
 }
 
-// fetchModels retrieves models from the database based on user permissions
-// It first tries to fetch user-specific models, then falls back to public models
 func (im *InferenceManager) fetchModels(ctx context.Context, userID *uint64, logfields map[string]string) ([]Model, error) {
-	// Build logger with structured fields
-	log := im.Log
-	for k, v := range logfields {
-		log = log.With(k, v)
-	}
+	log := logWithFields(im.Log, logfields)
 
-	// Try to fetch user-specific models first if user is authenticated
 	if userID != nil {
 		userModels, err := im.queryModels(ctx, logfields, `
 			SELECT name, DATE_FORMAT(created_at, '%Y-%m-%d %H:%i:%s') as created,
@@ -119,7 +110,6 @@ func (im *InferenceManager) fetchModels(ctx context.Context, userID *uint64, log
 		}
 	}
 
-	// Fetch public models (fallback or default)
 	return im.queryModels(ctx, logfields, `
 		SELECT name, DATE_FORMAT(created_at, '%Y-%m-%d %H:%i:%s') as created,
 			icpt, ocpt, crc, metadata, modality, supported_endpoints
@@ -128,13 +118,8 @@ func (im *InferenceManager) fetchModels(ctx context.Context, userID *uint64, log
 		ORDER BY name ASC`)
 }
 
-// queryModels executes a database query and scans the results into Model structs
 func (im *InferenceManager) queryModels(ctx context.Context, logfields map[string]string, query string, args ...any) ([]Model, error) {
-	// Build logger with structured fields
-	log := im.Log
-	for k, v := range logfields {
-		log = log.With(k, v)
-	}
+	log := logWithFields(im.Log, logfields)
 
 	rows, err := im.RDB.QueryContext(ctx, query, args...)
 	if err != nil {

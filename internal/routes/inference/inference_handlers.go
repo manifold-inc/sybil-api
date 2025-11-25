@@ -33,11 +33,9 @@ func (im *InferenceManager) ResponsesRequest(cc echo.Context) error {
 	return err
 }
 
-// CompletionRequestNewHistory is the HTTP handler wrapper for the history creation logic
 func (im *InferenceManager) CompletionRequestNewHistory(cc echo.Context) error {
 	c := cc.(*setup.Context)
 
-	// Read HTTP body
 	body, err := readRequestBody(c)
 	if err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "failed to read request body"})
@@ -45,26 +43,9 @@ func (im *InferenceManager) CompletionRequestNewHistory(cc echo.Context) error {
 
 	logfields := buildLogFields(c, shared.ENDPOINTS.CHAT, nil)
 
-	// Set up SSE response headers early
-	c.Response().Header().Set("Content-Type", "text/event-stream")
-	c.Response().Header().Set("Cache-Control", "no-cache")
-	c.Response().Header().Set("Connection", "keep-alive")
-	c.Response().WriteHeader(http.StatusOK)
+	setupSSEHeaders(c)
+	streamCallback := createStreamCallback(c)
 
-	// Create streaming callback for real-time token delivery
-	streamCallback := func(token string) error {
-		if c.Request().Context().Err() != nil {
-			return c.Request().Context().Err()
-		}
-		_, err := fmt.Fprintf(c.Response(), "%s\n\n", token)
-		if err != nil {
-			return err
-		}
-		c.Response().Flush()
-		return nil
-	}
-
-	// Call pure logic function with streaming callback
 	output, err := im.completionRequestNewHistoryLogic(&NewHistoryInput{
 		Body:         body,
 		User:         *c.User,
@@ -75,20 +56,17 @@ func (im *InferenceManager) CompletionRequestNewHistory(cc echo.Context) error {
 	})
 	if err != nil {
 		c.Log.Errorw("History creation failed", "error", err)
-		return nil // Already sent headers, can't send JSON error
+		return nil
 	}
 
-	// Handle errors from logic layer
 	if output.Error != nil {
 		c.Log.Errorw("History logic error", "error", output.Error.Message)
-		return nil // Already sent headers, can't send JSON error
+		return nil
 	}
 
-	// Write history ID event first
 	_, _ = fmt.Fprintf(c.Response(), "data: %s\n\n", output.HistoryIDJSON)
 	c.Response().Flush()
 
-	// For non-streaming, write final response as SSE
 	if !output.Stream && len(output.FinalResponse) > 0 {
 		_, _ = fmt.Fprintf(c.Response(), "data: %s\n\n", string(output.FinalResponse))
 		c.Response().Flush()
@@ -101,25 +79,21 @@ func (im *InferenceManager) CompletionRequestNewHistory(cc echo.Context) error {
 func (im *InferenceManager) UpdateHistory(cc echo.Context) error {
 	c := cc.(*setup.Context)
 
-	// Read HTTP body
 	body, err := readRequestBody(c)
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, shared.ErrInternalServerError)
 	}
 
-	// Parse request
 	var req UpdateHistoryRequest
 	if err := json.Unmarshal(body, &req); err != nil {
 		c.Log.Errorw("Failed to unmarshal request body", "error", err.Error())
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid JSON format"})
 	}
 
-	// Get history ID from URL param
 	historyID := c.Param("history_id")
 
 	logfields := buildLogFields(c, shared.ENDPOINTS.CHAT, map[string]string{"history_id": historyID})
 
-	// Call pure logic function (note: renamed internal function to avoid conflict)
 	output, err := im.updateHistoryLogic(&UpdateHistoryInput{
 		HistoryID: historyID,
 		Messages:  req.Messages,
@@ -132,12 +106,10 @@ func (im *InferenceManager) UpdateHistory(cc echo.Context) error {
 		return c.JSON(http.StatusInternalServerError, shared.ErrInternalServerError)
 	}
 
-	// Handle errors from logic layer
 	if output.Error != nil {
 		return c.JSON(output.Error.StatusCode, map[string]string{"error": output.Error.Message})
 	}
 
-	// Write success response
 	return c.JSON(http.StatusOK, map[string]any{
 		"message": output.Message,
 		"id":      output.HistoryID,
@@ -162,4 +134,25 @@ func buildLogFields(c *setup.Context, endpoint string, extras map[string]string)
 	}
 	maps.Copy(fields, extras)
 	return fields
+}
+
+func setupSSEHeaders(c *setup.Context) {
+	c.Response().Header().Set("Content-Type", "text/event-stream")
+	c.Response().Header().Set("Cache-Control", "no-cache")
+	c.Response().Header().Set("Connection", "keep-alive")
+	c.Response().WriteHeader(http.StatusOK)
+}
+
+func createStreamCallback(c *setup.Context) func(token string) error {
+	return func(token string) error {
+		if c.Request().Context().Err() != nil {
+			return c.Request().Context().Err()
+		}
+		_, err := fmt.Fprintf(c.Response(), "%s\n\n", token)
+		if err != nil {
+			return err
+		}
+		c.Response().Flush()
+		return nil
+	}
 }

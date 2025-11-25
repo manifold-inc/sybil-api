@@ -1,7 +1,6 @@
 package inference
 
 import (
-	"fmt"
 	"net/http"
 
 	"sybil-api/internal/setup"
@@ -44,28 +43,10 @@ func (im *InferenceManager) HandleInferenceHTTP(cc echo.Context, endpoint string
 		})
 	}
 
-	// Create streaming callback for real-time token delivery
 	var streamCallback func(token string) error
 	if reqInfo.Stream {
-		// Set SSE headers before streaming starts
-		c.Response().Header().Set("Content-Type", "text/event-stream")
-		c.Response().Header().Set("Cache-Control", "no-cache")
-		c.Response().Header().Set("Connection", "keep-alive")
-		c.Response().WriteHeader(http.StatusOK)
-
-		streamCallback = func(token string) error {
-			// Check if client disconnected
-			if c.Request().Context().Err() != nil {
-				return c.Request().Context().Err()
-			}
-			// Write token immediately to client
-			_, err := fmt.Fprintf(c.Response(), "%s\n\n", token)
-			if err != nil {
-				return err
-			}
-			c.Response().Flush()
-			return nil
-		}
+		setupSSEHeaders(c)
+		streamCallback = createStreamCallback(c)
 	}
 
 	out, reqErr := im.DoInference(InferenceInput{
@@ -84,13 +65,12 @@ func (im *InferenceManager) HandleInferenceHTTP(cc echo.Context, endpoint string
 		if reqErr.Err != nil {
 			message = reqErr.Err.Error()
 		}
-		
-		// If streaming already started, we can't send JSON error
+
 		if reqInfo.Stream {
 			c.Log.Errorw("Error after streaming started", "error", message)
 			return "", nil
 		}
-		
+
 		return "", c.JSON(reqErr.StatusCode, shared.OpenAIError{
 			Message: message,
 			Object:  "error",
@@ -103,7 +83,6 @@ func (im *InferenceManager) HandleInferenceHTTP(cc echo.Context, endpoint string
 		return "", nil
 	}
 
-	// For streaming, response already sent via callback
 	if out.Stream {
 		return string(out.FinalResponse), nil
 	}

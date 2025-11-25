@@ -100,3 +100,13 @@ func (im *InferenceManager) ShutDown() {
 	}
 }
 
+func logWithFields(logger *zap.SugaredLogger, fields map[string]string) *zap.SugaredLogger {
+	if len(fields) == 0 {
+		return logger
+	}
+	args := make([]interface{}, 0, len(fields)*2)
+	for k, v := range fields {
+		args = append(args, k, v)
+	}
+	return logger.With(args...)
+}

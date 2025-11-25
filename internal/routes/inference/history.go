@@ -63,13 +63,7 @@ type HistoryError struct {
 }
 
 func (im *InferenceManager) completionRequestNewHistoryLogic(input *NewHistoryInput) (*NewHistoryOutput, error) {
-	// Build logger from logfields
-	log := im.Log
-	if input.LogFields != nil {
-		for k, v := range input.LogFields {
-			log = log.With(k, v)
-		}
-	}
+	log := logWithFields(im.Log, input.LogFields)
 
 	// Parse request body
 	var payload shared.InferenceBody
@@ -225,7 +219,7 @@ func (im *InferenceManager) completionRequestNewHistoryLogic(input *NewHistoryIn
 				Err:        reqErr.Err,
 			},
 		}, nil
-	}
+		}
 
 	if out == nil {
 		return &NewHistoryOutput{
@@ -244,35 +238,35 @@ func (im *InferenceManager) completionRequestNewHistoryLogic(input *NewHistoryIn
 
 	// Update history with assistant response asynchronously
 	if assistantContent != "" {
-		var allMessages []shared.ChatMessage
-		allMessages = append(allMessages, messages...)
+	var allMessages []shared.ChatMessage
+	allMessages = append(allMessages, messages...)
 		allMessages = append(allMessages, shared.ChatMessage{
 			Role:    "assistant",
 			Content: assistantContent,
 		})
 
-		allMessagesJSON, err := json.Marshal(allMessages)
-		if err != nil {
+	allMessagesJSON, err := json.Marshal(allMessages)
+	if err != nil {
 			log.Errorw("Failed to marshal complete messages", "error", err)
 		} else {
-			go func(userID uint64, historyID string, messagesJSON []byte, log *zap.SugaredLogger) {
-				updateQuery := `
+	go func(userID uint64, historyID string, messagesJSON []byte, log *zap.SugaredLogger) {
+		updateQuery := `
 			UPDATE chat_history 
 			SET messages = ?, updated_at = NOW()
 			WHERE history_id = ?
 		`
 
-				_, err := im.WDB.Exec(updateQuery, string(messagesJSON), historyID)
-				if err != nil {
-					log.Errorw("Failed to update history in database", "error", err, "history_id", historyID)
-					return
-				}
+		_, err := im.WDB.Exec(updateQuery, string(messagesJSON), historyID)
+		if err != nil {
+			log.Errorw("Failed to update history in database", "error", err, "history_id", historyID)
+			return
+		}
 
-				log.Infow("Chat history updated with assistant response", "history_id", historyID, "user_id", userID)
+		log.Infow("Chat history updated with assistant response", "history_id", historyID, "user_id", userID)
 
-				if err := im.updateUserStreak(userID, log); err != nil {
-					log.Errorw("Failed to update user streak", "error", err, "user_id", userID)
-				}
+		if err := im.updateUserStreak(userID, log); err != nil {
+			log.Errorw("Failed to update user streak", "error", err, "user_id", userID)
+		}
 			}(input.User.UserID, historyID, allMessagesJSON, log)
 		}
 	}
@@ -286,13 +280,7 @@ func (im *InferenceManager) completionRequestNewHistoryLogic(input *NewHistoryIn
 }
 
 func (im *InferenceManager) updateHistoryLogic(input *UpdateHistoryInput) (*UpdateHistoryOutput, error) {
-	// Build logger from logfields
-	log := im.Log
-	if input.LogFields != nil {
-		for k, v := range input.LogFields {
-			log = log.With(k, v)
-		}
-	}
+	log := logWithFields(im.Log, input.LogFields)
 
 	// Check if history exists and get owner user ID
 	var ownerUserID uint64

@@ -19,13 +19,7 @@ type PreprocessInput struct {
 func (im *InferenceManager) Preprocess(input PreprocessInput) (*shared.RequestInfo, *shared.RequestError) {
 	startTime := time.Now()
 
-	// Build logger from logfields
-	newlog := im.Log
-	if input.LogFields != nil {
-		for k, v := range input.LogFields {
-			newlog = newlog.With(k, v)
-		}
-	}
+	newlog := logWithFields(im.Log, input.LogFields)
 
 	// Unmarshal to generic map to set defaults
 	var payload map[string]any
@@ -44,7 +38,6 @@ func (im *InferenceManager) Preprocess(input PreprocessInput) (*shared.RequestIn
 
 	modelName := model.(string)
 
-	// Add model and endpoint to logger context for all subsequent logs
 	newlog = newlog.With("model", modelName, "endpoint", input.Endpoint)
 
 	if input.Endpoint == shared.ENDPOINTS.EMBEDDING {

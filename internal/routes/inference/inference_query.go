@@ -26,13 +26,7 @@ type QueryInput struct {
 
 // QueryModels forwards the request to the appropriate model
 func (im *InferenceManager) QueryModels(input QueryInput) (*shared.ResponseInfo, *shared.RequestError) {
-	// Build logger from logfields
-	newlog := im.Log
-	if input.LogFields != nil {
-		for k, v := range input.LogFields {
-			newlog = newlog.With(k, v)
-		}
-	}
+	newlog := logWithFields(im.Log, input.LogFields)
 
 	// Discover inference service
 	modelMetadata, err := im.DiscoverModels(input.Ctx, input.Req.UserID, input.Req.Model)
@@ -161,7 +155,7 @@ func (im *InferenceManager) QueryModels(input QueryInput) (*shared.ResponseInfo,
 	var ttftRecorded bool
 	hasDone := false
 
-	if input.Req.Stream && !canceled { // Check if the request is streaming
+	if input.Req.Stream && !canceled {
 		reader := bufio.NewScanner(res.Body)
 		var currentEvent string
 
@@ -237,7 +231,6 @@ func (im *InferenceManager) QueryModels(input QueryInput) (*shared.ResponseInfo,
 			}
 		}
 
-		// Always collect response content since saving decision is made in DoInference
 		responseJSON, err := json.Marshal(responses)
 		if err == nil {
 			responseContent = string(responseJSON)
