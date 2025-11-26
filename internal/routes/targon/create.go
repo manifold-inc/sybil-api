@@ -32,8 +32,8 @@ type CreateModelRequest struct {
 	Env              map[string]string `json:"env,omitempty"`
 
 	ResourceName string `json:"resource_name"`
-	MinReplicas  *int   `json:"min_replicas,omitempty"`
-	MaxReplicas  int    `json:"max_replicas"`
+	MinReplicas  *int   `json:"minReplicas,omitempty"`
+	MaxReplicas  int    `json:"maxReplicas"`
 
 	ScalingConfig *ScalingConfig `json:"scaling,omitempty"`
 	Pricing       *Pricing       `json:"pricing,omitempty"`
@@ -302,7 +302,7 @@ func validateCreateModelRequest(req CreateModelRequest) error {
 		return errors.New("resource_name is required")
 	}
 	if req.MaxReplicas < 1 {
-		return errors.New("max_replicas must be at least 1")
+		return errors.New("maxReplicas must be at least 1")
 	}
 
 	// Validate shared memory size format if provided
@@ -358,6 +358,7 @@ func validateCreateModelRequest(req CreateModelRequest) error {
 			"structured_outputs": true,
 			"web_search":         true,
 			"reasoning":          true,
+			"vision_language":    true,
 		}
 
 		for _, param := range req.Metadata.SupportedSamplingParameters {
@@ -368,7 +369,7 @@ func validateCreateModelRequest(req CreateModelRequest) error {
 
 		for _, feature := range req.Metadata.SupportedFeatures {
 			if !validFeatures[feature] {
-				return fmt.Errorf("invalid feature: %s. Valid features are: tools, json_mode, structured_outputs, web_search, reasoning", feature)
+				return fmt.Errorf("invalid feature: %s. Valid features are: tools, json_mode, structured_outputs, web_search, reasoning, vision_language", feature)
 			}
 		}
 	}
