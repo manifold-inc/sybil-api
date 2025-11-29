@@ -277,51 +277,73 @@ func extractContentFromStreamingResponse(responseContent string) string {
 }
 
 func (im *InferenceManager) updateUserStreak(userID uint64, log *zap.SugaredLogger) error {
-	var lastChatStr sql.NullString
 	var currentStreak uint64
+	var lastChat sql.NullTime
 
 	err := im.RDB.QueryRow(`
 		SELECT last_chat, streak 
 		FROM user 
 		WHERE id = ?
-	`, userID).Scan(&lastChatStr, &currentStreak)
-	if err != nil {
-		return fmt.Errorf("failed to get user streak data: %w", err)
-	}
+	`, userID).Scan(&lastChat, &currentStreak)
 
-	var lastChat sql.NullTime
-	if lastChatStr.Valid && lastChatStr.String != "" {
-		formats := []string{
-			"2006-01-02 15:04:05",
-			time.RFC3339,
-			"2006-01-02T15:04:05Z07:00",
-			"2006-01-02 15:04:05.000000",
+	if err != nil {
+		var lastChatStr sql.NullString
+		err = im.RDB.QueryRow(`
+			SELECT last_chat, streak 
+			FROM user 
+			WHERE id = ?
+		`, userID).Scan(&lastChatStr, &currentStreak)
+		if err != nil {
+			return fmt.Errorf("failed to get user streak data: %w", err)
 		}
 
-		var parsedTime time.Time
-		var parseErr error
-		for _, format := range formats {
-			parsedTime, parseErr = time.Parse(format, lastChatStr.String)
-			if parseErr == nil {
-				lastChat = sql.NullTime{Time: parsedTime, Valid: true}
-				break
+		if lastChatStr.Valid && lastChatStr.String != "" {
+			formats := []string{
+				"2006-01-02 15:04:05",
+				time.RFC3339,
+				"2006-01-02T15:04:05Z07:00",
+				"2006-01-02 15:04:05.000000",
+				"2006-01-02T15:04:05Z",
+				"2006-01-02 15:04:05.000000000",
+			}
+
+			var parsedTime time.Time
+			var parseErr error
+			for _, format := range formats {
+				parsedTime, parseErr = time.Parse(format, lastChatStr.String)
+				if parseErr == nil {
+					lastChat = sql.NullTime{Time: parsedTime, Valid: true}
+					break
+				}
+			}
+
+			if parseErr != nil {
+				log.Errorw("Failed to parse last_chat timestamp, preserving current streak",
+					"error", parseErr,
+					"value", lastChatStr.String,
+					"current_streak", currentStreak)
+				_, err = im.WDB.Exec(`
+					UPDATE user 
+					SET last_chat = ? 
+					WHERE id = ?
+				`, time.Now().UTC(), userID)
+				if err != nil {
+					return fmt.Errorf("failed to update last_chat after parse error: %w", err)
+				}
+				return nil
 			}
 		}
-
-		if parseErr != nil {
-			log.Warnw("Failed to parse last_chat timestamp", "error", parseErr, "value", lastChatStr.String)
-		}
 	}
 
-	now := time.Now()
-	todayMidnight := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+	now := time.Now().UTC()
+	todayMidnight := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
 
 	var newStreak uint64
 	updateStreak := false
 
 	if lastChat.Valid {
-		lastChatDate := lastChat.Time
-		lastChatMidnight := time.Date(lastChatDate.Year(), lastChatDate.Month(), lastChatDate.Day(), 0, 0, 0, 0, lastChatDate.Location())
+		lastChatDate := lastChat.Time.UTC()
+		lastChatMidnight := time.Date(lastChatDate.Year(), lastChatDate.Month(), lastChatDate.Day(), 0, 0, 0, 0, time.UTC)
 
 		if !todayMidnight.Equal(lastChatMidnight) {
 			updateStreak = true
