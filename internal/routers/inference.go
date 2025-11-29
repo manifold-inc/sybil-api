@@ -4,6 +4,7 @@ package routers
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"time"
@@ -44,8 +45,8 @@ func RegisterInferenceRoutes(e *echo.Group, wdb *sql.DB, rdb *sql.DB, redisClien
 	requireUser.POST("/completions", inferenceRouter.CompletionRequest)
 	requireUser.POST("/embeddings", inferenceRouter.EmbeddingRequest)
 	requireUser.POST("/responses", inferenceRouter.ResponsesRequest)
-	requireUser.POST("/chat/history/new", inferenceManager.CompletionRequestNewHistory)
-	requireUser.PATCH("/chat/history/:history_id", inferenceManager.UpdateHistory)
+	requireUser.POST("/chat/history/new", inferenceRouter.CompletionRequestNewHistory)
+	requireUser.PATCH("/chat/history/:history_id", inferenceRouter.UpdateHistory)
 	return inferenceManager.ShutDown, nil
 }
 
@@ -187,4 +188,88 @@ func (ir *InferenceRouter) Inference(cc echo.Context, endpoint string) (string, 
 		return "", err
 	}
 	return string(out.FinalResponse), nil
+}
+
+func (ir *InferenceRouter) CompletionRequestNewHistory(cc echo.Context) error {
+	c := cc.(*Context)
+
+	body, err := readRequestBody(c)
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "failed to read request body"})
+	}
+
+	logfields := buildLogFields(c, shared.ENDPOINTS.CHAT, nil)
+
+	setupSSEHeaders(c)
+	streamCallback := createStreamCallback(c)
+
+	output, err := ir.ih.CompletionRequestNewHistoryLogic(&inferenceRoute.NewHistoryInput{
+		Body:         body,
+		User:         *c.User,
+		RequestID:    c.Reqid,
+		Ctx:          c.Request().Context(),
+		LogFields:    logfields,
+		StreamWriter: streamCallback, // Pass callback for real-time streaming
+	})
+	if err != nil {
+		c.Log.Errorw("History creation failed", "error", err)
+		return nil
+	}
+
+	if output.Error != nil {
+		c.Log.Errorw("History logic error", "error", output.Error.Message)
+		return nil
+	}
+
+	_, _ = fmt.Fprintf(c.Response(), "data: %s\n\n", output.HistoryIDJSON)
+	c.Response().Flush()
+
+	if !output.Stream && len(output.FinalResponse) > 0 {
+		_, _ = fmt.Fprintf(c.Response(), "data: %s\n\n", string(output.FinalResponse))
+		c.Response().Flush()
+	}
+
+	return nil
+}
+
+// UpdateHistory is the HTTP handler wrapper for the history update logic
+func (ir *InferenceRouter) UpdateHistory(cc echo.Context) error {
+	c := cc.(*Context)
+
+	body, err := readRequestBody(c)
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, shared.ErrInternalServerError)
+	}
+
+	var req inferenceRoute.UpdateHistoryRequest
+	if err := json.Unmarshal(body, &req); err != nil {
+		c.Log.Errorw("Failed to unmarshal request body", "error", err.Error())
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid JSON format"})
+	}
+
+	historyID := c.Param("history_id")
+
+	logfields := buildLogFields(c, shared.ENDPOINTS.CHAT, map[string]string{"history_id": historyID})
+
+	output, err := ir.ih.UpdateHistoryLogic(&inferenceRoute.UpdateHistoryInput{
+		HistoryID: historyID,
+		Messages:  req.Messages,
+		UserID:    c.User.UserID,
+		Ctx:       c.Request().Context(),
+		LogFields: logfields,
+	})
+	if err != nil {
+		c.Log.Errorw("History update failed", "error", err)
+		return c.JSON(http.StatusInternalServerError, shared.ErrInternalServerError)
+	}
+
+	if output.Error != nil {
+		return c.JSON(output.Error.StatusCode, map[string]string{"error": output.Error.Message})
+	}
+
+	return c.JSON(http.StatusOK, map[string]any{
+		"message": output.Message,
+		"id":      output.HistoryID,
+		"user_id": output.UserID,
+	})
 }

@@ -62,7 +62,7 @@ type HistoryError struct {
 	Err        error
 }
 
-func (im *InferenceHandler) completionRequestNewHistoryLogic(input *NewHistoryInput) (*NewHistoryOutput, error) {
+func (im *InferenceHandler) CompletionRequestNewHistoryLogic(input *NewHistoryInput) (*NewHistoryOutput, error) {
 	log := logWithFields(im.Log, input.LogFields)
 
 	// Parse request body
@@ -279,7 +279,7 @@ func (im *InferenceHandler) completionRequestNewHistoryLogic(input *NewHistoryIn
 	}, nil
 }
 
-func (im *InferenceHandler) updateHistoryLogic(input *UpdateHistoryInput) (*UpdateHistoryOutput, error) {
+func (im *InferenceHandler) UpdateHistoryLogic(input *UpdateHistoryInput) (*UpdateHistoryOutput, error) {
 	log := logWithFields(im.Log, input.LogFields)
 
 	// Check if history exists and get owner user ID
