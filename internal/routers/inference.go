@@ -232,6 +232,10 @@ func (ir *InferenceRouter) CompletionRequestNewHistory(cc echo.Context) error {
 	return nil
 }
 
+type UpdateHistoryRequest struct {
+	Messages []shared.ChatMessage `json:"messages,omitempty"`
+}
+
 // UpdateHistory is the HTTP handler wrapper for the history update logic
 func (ir *InferenceRouter) UpdateHistory(cc echo.Context) error {
 	c := cc.(*Context)
@@ -241,7 +245,7 @@ func (ir *InferenceRouter) UpdateHistory(cc echo.Context) error {
 		return c.JSON(http.StatusInternalServerError, shared.ErrInternalServerError)
 	}
 
-	var req inferenceRoute.UpdateHistoryRequest
+	var req UpdateHistoryRequest
 	if err := json.Unmarshal(body, &req); err != nil {
 		c.Log.Errorw("Failed to unmarshal request body", "error", err.Error())
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid JSON format"})

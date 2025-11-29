@@ -15,10 +15,6 @@ import (
 	"go.uber.org/zap"
 )
 
-type UpdateHistoryRequest struct {
-	Messages []shared.ChatMessage `json:"messages,omitempty"`
-}
-
 // NewHistoryInput contains all inputs needed to create a new chat history entry with inference
 type NewHistoryInput struct {
 	Body         []byte
