@@ -62,7 +62,7 @@ type HistoryError struct {
 	Err        error
 }
 
-func (im *InferenceManager) completionRequestNewHistoryLogic(input *NewHistoryInput) (*NewHistoryOutput, error) {
+func (im *InferenceHandler) completionRequestNewHistoryLogic(input *NewHistoryInput) (*NewHistoryOutput, error) {
 	log := logWithFields(im.Log, input.LogFields)
 
 	// Parse request body
@@ -279,7 +279,7 @@ func (im *InferenceManager) completionRequestNewHistoryLogic(input *NewHistoryIn
 	}, nil
 }
 
-func (im *InferenceManager) updateHistoryLogic(input *UpdateHistoryInput) (*UpdateHistoryOutput, error) {
+func (im *InferenceHandler) updateHistoryLogic(input *UpdateHistoryInput) (*UpdateHistoryOutput, error) {
 	log := logWithFields(im.Log, input.LogFields)
 
 	// Check if history exists and get owner user ID
@@ -445,7 +445,7 @@ func extractContentFromFinalResponse(finalResponse []byte) string {
 	return ""
 }
 
-func (im *InferenceManager) updateUserStreak(userID uint64, log *zap.SugaredLogger) error {
+func (im *InferenceHandler) updateUserStreak(userID uint64, log *zap.SugaredLogger) error {
 	var lastChatStr sql.NullString
 	var currentStreak uint64
 

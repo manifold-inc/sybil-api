@@ -9,7 +9,7 @@ import (
 	"github.com/labstack/echo/v4"
 )
 
-func (im *InferenceManager) HandleInferenceHTTP(cc echo.Context, endpoint string) (string, error) {
+func (im *InferenceHandler) HandleInferenceHTTP(cc echo.Context, endpoint string) (string, error) {
 	c := cc.(*setup.Context)
 	body, err := readRequestBody(c)
 	if err != nil {

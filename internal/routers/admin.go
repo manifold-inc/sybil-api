@@ -4,7 +4,7 @@ import (
 	"database/sql"
 
 	"sybil-api/internal/middleware"
-	"sybil-api/internal/routes/targon"
+	"sybil-api/internal/handlers/targon"
 
 	"github.com/labstack/echo/v4"
 	"github.com/redis/go-redis/v9"

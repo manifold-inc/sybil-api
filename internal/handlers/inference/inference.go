@@ -32,7 +32,7 @@ type InferenceOutput struct {
 	Canceled         bool
 }
 
-func (im *InferenceManager) DoInference(input InferenceInput) (*InferenceOutput, *shared.RequestError) {
+func (im *InferenceHandler) DoInference(input InferenceInput) (*InferenceOutput, *shared.RequestError) {
 	if input.Req == nil {
 		return nil, &shared.RequestError{
 			StatusCode: 500,

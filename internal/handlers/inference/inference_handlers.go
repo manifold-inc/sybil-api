@@ -13,27 +13,27 @@ import (
 	"github.com/labstack/echo/v4"
 )
 
-func (im *InferenceManager) ChatRequest(cc echo.Context) error {
+func (im *InferenceHandler) ChatRequest(cc echo.Context) error {
 	_, err := im.HandleInferenceHTTP(cc, shared.ENDPOINTS.CHAT)
 	return err
 }
 
-func (im *InferenceManager) CompletionRequest(cc echo.Context) error {
+func (im *InferenceHandler) CompletionRequest(cc echo.Context) error {
 	_, err := im.HandleInferenceHTTP(cc, shared.ENDPOINTS.COMPLETION)
 	return err
 }
 
-func (im *InferenceManager) EmbeddingRequest(cc echo.Context) error {
+func (im *InferenceHandler) EmbeddingRequest(cc echo.Context) error {
 	_, err := im.HandleInferenceHTTP(cc, shared.ENDPOINTS.EMBEDDING)
 	return err
 }
 
-func (im *InferenceManager) ResponsesRequest(cc echo.Context) error {
+func (im *InferenceHandler) ResponsesRequest(cc echo.Context) error {
 	_, err := im.HandleInferenceHTTP(cc, shared.ENDPOINTS.RESPONSES)
 	return err
 }
 
-func (im *InferenceManager) CompletionRequestNewHistory(cc echo.Context) error {
+func (im *InferenceHandler) CompletionRequestNewHistory(cc echo.Context) error {
 	c := cc.(*setup.Context)
 
 	body, err := readRequestBody(c)
@@ -76,7 +76,7 @@ func (im *InferenceManager) CompletionRequestNewHistory(cc echo.Context) error {
 }
 
 // UpdateHistory is the HTTP handler wrapper for the history update logic
-func (im *InferenceManager) UpdateHistory(cc echo.Context) error {
+func (im *InferenceHandler) UpdateHistory(cc echo.Context) error {
 	c := cc.(*setup.Context)
 
 	body, err := readRequestBody(c)

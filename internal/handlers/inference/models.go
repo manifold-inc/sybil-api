@@ -7,10 +7,7 @@ import (
 	"fmt"
 	"time"
 
-	"sybil-api/internal/setup"
 	"sybil-api/internal/shared"
-
-	"github.com/labstack/echo/v4"
 )
 
 type Model struct {
@@ -63,36 +60,7 @@ type ModelMetadata struct {
 	MaxInputLength              *int     `json:"max_input_length,omitempty"`
 }
 
-func (im *InferenceManager) Models(cc echo.Context) error {
-	c := cc.(*setup.Context)
-
-	ctx, cancel := context.WithTimeout(c.Request().Context(), 5*time.Second)
-	defer cancel()
-
-	logfields := map[string]string{
-		"endpoint": "models",
-	}
-	if c.User != nil {
-		logfields["user_id"] = fmt.Sprintf("%d", c.User.UserID)
-	}
-
-	var userID *uint64
-	if c.User != nil {
-		userID = &c.User.UserID
-	}
-
-	models, err := im.fetchModels(ctx, userID, logfields)
-	if err != nil {
-		c.Log.Errorw("Failed to get models", "error", err.Error())
-		return cc.String(500, "Failed to get models")
-	}
-
-	return c.JSON(200, ModelList{
-		Data: models,
-	})
-}
-
-func (im *InferenceManager) fetchModels(ctx context.Context, userID *uint64, logfields map[string]string) ([]Model, error) {
+func (im *InferenceHandler) ListModels(ctx context.Context, userID *uint64, logfields map[string]string) ([]Model, error) {
 	log := logWithFields(im.Log, logfields)
 
 	if userID != nil {
@@ -118,7 +86,7 @@ func (im *InferenceManager) fetchModels(ctx context.Context, userID *uint64, log
 		ORDER BY name ASC`)
 }
 
-func (im *InferenceManager) queryModels(ctx context.Context, logfields map[string]string, query string, args ...any) ([]Model, error) {
+func (im *InferenceHandler) queryModels(ctx context.Context, logfields map[string]string, query string, args ...any) ([]Model, error) {
 	log := logWithFields(im.Log, logfields)
 
 	rows, err := im.RDB.QueryContext(ctx, query, args...)

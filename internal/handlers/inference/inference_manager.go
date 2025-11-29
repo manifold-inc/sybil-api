@@ -16,7 +16,7 @@ import (
 	"go.uber.org/zap"
 )
 
-type InferenceManager struct {
+type InferenceHandler struct {
 	WDB          *sql.DB
 	RDB          *sql.DB
 	RedisClient  *redis.Client
@@ -27,7 +27,7 @@ type InferenceManager struct {
 	usageCache   *buckets.UsageCache
 }
 
-func NewInferenceManager(wdb *sql.DB, rdb *sql.DB, redisClient *redis.Client, log *zap.SugaredLogger, debug bool) (*InferenceManager, error) {
+func NewInferenceHandler(wdb *sql.DB, rdb *sql.DB, redisClient *redis.Client, log *zap.SugaredLogger, debug bool) (*InferenceHandler, error) {
 	// check if the databases are connected
 	err := wdb.Ping()
 	if err != nil {
@@ -46,7 +46,7 @@ func NewInferenceManager(wdb *sql.DB, rdb *sql.DB, redisClient *redis.Client, lo
 
 	usageCache := buckets.NewUsageCache(log, wdb)
 
-	return &InferenceManager{
+	return &InferenceHandler{
 		WDB:         wdb,
 		RDB:         rdb,
 		RedisClient: redisClient,
@@ -57,7 +57,7 @@ func NewInferenceManager(wdb *sql.DB, rdb *sql.DB, redisClient *redis.Client, lo
 	}, nil
 }
 
-func (im *InferenceManager) getHTTPClient(modelURL string) *http.Client {
+func (im *InferenceHandler) getHTTPClient(modelURL string) *http.Client {
 	parsedURL, err := url.Parse(modelURL)
 	if err != nil {
 		im.Log.Warnw("Failed to parse model URL, using full URL as key", "url", modelURL, "error", err)
@@ -94,7 +94,7 @@ func (im *InferenceManager) getHTTPClient(modelURL string) *http.Client {
 	return client
 }
 
-func (im *InferenceManager) ShutDown() {
+func (im *InferenceHandler) ShutDown() {
 	if im.usageCache != nil {
 		im.usageCache.Shutdown()
 	}

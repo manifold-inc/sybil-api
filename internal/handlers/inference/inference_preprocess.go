@@ -16,7 +16,7 @@ type PreprocessInput struct {
 	LogFields map[string]string
 }
 
-func (im *InferenceManager) Preprocess(input PreprocessInput) (*shared.RequestInfo, *shared.RequestError) {
+func (im *InferenceHandler) Preprocess(input PreprocessInput) (*shared.RequestInfo, *shared.RequestError) {
 	startTime := time.Now()
 
 	newlog := logWithFields(im.Log, input.LogFields)

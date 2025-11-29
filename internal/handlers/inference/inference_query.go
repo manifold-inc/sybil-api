@@ -25,7 +25,7 @@ type QueryInput struct {
 }
 
 // QueryModels forwards the request to the appropriate model
-func (im *InferenceManager) QueryModels(input QueryInput) (*shared.ResponseInfo, *shared.RequestError) {
+func (im *InferenceHandler) QueryModels(input QueryInput) (*shared.ResponseInfo, *shared.RequestError) {
 	newlog := logWithFields(im.Log, input.LogFields)
 
 	// Discover inference service
