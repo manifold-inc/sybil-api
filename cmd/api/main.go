@@ -9,20 +9,14 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
-	"time"
 
-	"sybil-api/internal/metrics"
-	auth "sybil-api/internal/middleware"
-	"sybil-api/internal/routes/inference"
-	"sybil-api/internal/routes/search"
-	"sybil-api/internal/routes/targon"
-	"sybil-api/internal/setup"
+	"sybil-api/internal/middleware"
+	"sybil-api/internal/routers"
 	"sybil-api/internal/shared"
 
-	"github.com/aidarkhanov/nanoid"
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/labstack/echo/v4"
-	"github.com/labstack/echo/v4/middleware"
+	emw "github.com/labstack/echo/v4/middleware"
 	"github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
 
@@ -36,10 +30,13 @@ func main() {
 	readDSN := flag.String("read-dsn", "", "Write vitess DSN")
 	metricsAPIKey := flag.String("metrics-api-key", "", "Metrics api key")
 	redisAddr := flag.String("redis-addr", "", "Redis host:port")
-	googleSearchEngineID := flag.String("google-search-engine-id", "", "Google search engine id")
-	googleAPIKey := flag.String("google-api-key", "", "Google search api key")
-	googleACURL := flag.String("google-ac-url", "", "Google AC URL")
 	debug := flag.Bool("debug", false, "Debug enabled")
+
+	// Leaving these here, as we will need them when we re-add gsearch
+	//googleSearchEngineID := flag.String("google-search-engine-id", "", "Google search engine id")
+	//googleAPIKey := flag.String("google-api-key", "", "Google search api key")
+	//googleACURL := flag.String("google-ac-url", "", "Google AC URL")
+
 
 	err := eflag.SetFlagsFromEnvironment()
 	if err != nil {
@@ -104,83 +101,11 @@ func main() {
 	}
 	log := logger.Sugar()
 
-	server := echo.New()
-	e := server.Group("")
-	e.Use(middleware.CORS())
-	e.Use(func(next echo.HandlerFunc) echo.HandlerFunc {
-		return func(c echo.Context) error {
-			reqID, _ := nanoid.Generate("0123456789abcdefghijklmnopqrstuvwxyz", 28)
-			logger := log.With(
-				"request_id", "req_"+reqID,
-			)
-			logger = logger.With("externalid", c.Request().Header.Get("X-Dippy-Request-Id"))
-
-			cc := &setup.Context{Context: c, Log: logger, Reqid: reqID}
-			start := time.Now()
-			err := next(cc)
-			duration := time.Since(start)
-			cc.Log.Infow("end_of_request", "status_code", fmt.Sprintf("%d", cc.Response().Status), "duration", duration.String())
-			metrics.ResponseCodes.WithLabelValues(cc.Path(), fmt.Sprintf("%d", cc.Response().Status)).Inc()
-			return err
-		}
-	})
-	e.Use(middleware.RecoverWithConfig(middleware.RecoverConfig{
-		StackSize: 1 << 10, // 1 KB
-		LogErrorFunc: func(c echo.Context, err error, stack []byte) error {
-			defer func() {
-				_ = log.Sync()
-			}()
-			log.Errorw("Api Panic", "error", err.Error())
-			return c.String(500, shared.ErrInternalServerError.Err.Error())
-		},
-	}))
-
+	e := echo.New()
 	e.GET(("/ping"), func(c echo.Context) error {
 		return c.String(200, "")
 	})
-
-	userManager := auth.NewUserManager(redisClient, readDB, log.With("manager", "user_manager"))
-	withUser := e.Group("", userManager.ExtractUser)
-	requiredUser := withUser.Group("", userManager.RequireUser)
-
-	inferenceGroup := requiredUser.Group("/v1")
-	inferenceManager, inferenceErr := inference.NewInferenceManager(writeDB, readDB, redisClient, log, *debug)
-	if inferenceErr != nil {
-		panic(inferenceErr)
-	}
-	defer inferenceManager.ShutDown()
-
-	inferenceGroup.GET("/models", inferenceManager.Models)
-	inferenceGroup.POST("/chat/completions", inferenceManager.ChatRequest)
-	inferenceGroup.POST("/completions", inferenceManager.CompletionRequest)
-	inferenceGroup.POST("/embeddings", inferenceManager.EmbeddingRequest)
-	inferenceGroup.POST("/responses", inferenceManager.ResponsesRequest)
-	inferenceGroup.POST("/chat/history/new", inferenceManager.CompletionRequestNewHistory)
-	inferenceGroup.PATCH("/chat/history/:history_id", inferenceManager.UpdateHistory)
-
-	searchGroup := requiredUser.Group("/search")
-	searchManager, err := search.NewSearchManager(inferenceManager.HandleInferenceHTTP, *googleSearchEngineID, *googleAPIKey, *googleACURL)
-	if err != nil {
-		panic(err)
-	}
-
-	searchGroup.POST("/images", searchManager.GetImages)
-	searchGroup.POST("", searchManager.Search)
-	searchGroup.GET("/autocomplete", searchManager.GetAutocomplete)
-	searchGroup.POST("/sources", searchManager.GetSources)
-
-	requiredAdmin := requiredUser.Group("", userManager.RequireAdmin)
-	targonGroup := requiredAdmin.Group("/models")
-	targonManager, targonErr := targon.NewTargonManager(writeDB, readDB, redisClient, log)
-	if targonErr != nil {
-		panic(targonErr)
-	}
-	targonGroup.POST("", targonManager.CreateModel)
-	targonGroup.DELETE("/:uid", targonManager.DeleteModel)
-	targonGroup.PATCH("", targonManager.UpdateModel)
-
-	metricsGroup := server.Group("/metrics")
-	metricsGroup.Use(func(next echo.HandlerFunc) echo.HandlerFunc {
+	e.GET("/metrics", echo.WrapHandler(promhttp.Handler()), func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c echo.Context) error {
 			apiKey, err := shared.ExtractAPIKey(c)
 			if err != nil {
@@ -193,11 +118,27 @@ func main() {
 			return next(c)
 		}
 	})
-	metricsGroup.GET("", echo.WrapHandler(promhttp.Handler()))
+	base := e.Group("")
+	base.Use(emw.CORS())
+	base.Use(middleware.NewRecoverMiddleware(log))
+	base.Use(middleware.NewTrackMiddleware(log))
+
+	middleware.InitUserMiddleware(redisClient, readDB, log)
+
+	// Register routes
+	err = routers.RegisterAdminRoutes(base, writeDB, readDB, redisClient, log)
+	if err != nil {
+		panic(err)
+	}
+	shutdown, err := routers.RegisterInferenceRoutes(base, writeDB, readDB, redisClient, log, *debug)
+	if err != nil {
+		panic(err)
+	}
+	defer shutdown()
 
 	go func() {
-		if err := server.Start(":80"); err != nil && err != http.ErrServerClosed {
-			server.Logger.Fatal("shutting down the server")
+		if err := e.Start(":80"); err != nil && err != http.ErrServerClosed {
+			e.Logger.Fatal("shutting down the server")
 		}
 	}()
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -207,7 +148,7 @@ func main() {
 
 	ctx, cancel := context.WithTimeout(context.Background(), shared.DefaultShutdownTimeout)
 	defer cancel()
-	if err := server.Shutdown(ctx); err != nil {
-		server.Logger.Fatal(err)
+	if err := e.Shutdown(ctx); err != nil {
+		e.Logger.Fatal(err)
 	}
 }
