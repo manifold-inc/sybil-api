@@ -41,6 +41,9 @@ type CreateModelRequest struct {
 	ContainerConcurrency *int64  `json:"containerConcurrency,omitempty"`
 	TimeoutSeconds       *int64  `json:"timeoutSeconds,omitempty"`
 	SharedMemorySize     *string `json:"shared_memory_size,omitempty"`
+
+	ReadinessProbe *Probes `json:"readinessProbe,omitempty"`
+	LivenessProbe  *Probes `json:"livenessProbe,omitempty"`
 }
 
 type ScalingConfig struct {
@@ -82,6 +85,8 @@ type TargonCustomInferenceContainer struct {
 	Ports            []TargonPort   `json:"ports,omitempty"`
 	Env              []TargonEnvVar `json:"env,omitempty"`
 	SharedMemorySize *string        `json:"shared_memory_size,omitempty"`
+	ReadinessProbe   *TargonProbe   `json:"readinessProbe,omitempty"`
+	LivenessProbe    *TargonProbe   `json:"livenessProbe,omitempty"`
 }
 
 type TargonPort struct {
@@ -126,6 +131,42 @@ type TargonServiceStatusResponse struct {
 		URL   string `json:"url"`
 		Ready bool   `json:"ready"`
 	} `json:"status"`
+}
+
+// User defined, from json curl request
+type Probes struct {
+	Endpoint            string `json:"endpoint"` // e.g. "/health", "/metrics" etc.
+	InitialDelaySeconds *int32 `json:"initialDelaySeconds,omitempty"`
+	PeriodSeconds       *int32 `json:"periodSeconds,omitempty"`
+	TimeoutSeconds      *int32 `json:"timeoutSeconds,omitempty"`
+	SuccessThreshold    *int32 `json:"successThreshold,omitempty"`
+	FailureThreshold    *int32 `json:"failureThreshold,omitempty"`
+}
+
+/*
+livenessProbe:
+    httpGet:
+    	path: /health
+    	port: 8000
+    initialDelaySeconds: 900
+    periodSeconds: 10
+    successThreshold: 1
+	failureThreshold: 3
+    timeoutSeconds: 3
+*/
+// To send something like above to Targon API
+type TargonHTTPGet struct {
+	Path string `json:"path,omitempty"`
+	Port int32  `json:"port,omitempty"`
+}
+
+type TargonProbe struct {
+	HTTPGet             *TargonHTTPGet `json:"httpGet,omitempty"`
+	InitialDelaySeconds *int32         `json:"initialDelaySeconds,omitempty"`
+	PeriodSeconds       *int32         `json:"periodSeconds,omitempty"`
+	TimeoutSeconds      *int32         `json:"timeoutSeconds,omitempty"`
+	SuccessThreshold    *int32         `json:"successThreshold,omitempty"`
+	FailureThreshold    *int32         `json:"failureThreshold,omitempty"`
 }
 
 func (t *TargonManager) CreateModel(cc echo.Context) error {
@@ -374,8 +415,83 @@ func validateCreateModelRequest(req CreateModelRequest) error {
 		}
 	}
 
+	//TODO: Add more endpoints
+	validProbeEndpoints := map[string]bool{
+		"/health": true,
+	}
+
+	if req.ReadinessProbe != nil {
+		if req.ReadinessProbe.Endpoint == "" {
+			return errors.New("readinessProbe endpoint cannot be empty")
+		}
+		if !validProbeEndpoints[req.ReadinessProbe.Endpoint] {
+			return fmt.Errorf("invalid readinessProbe endpoint: %s. Valid endpoints are: /health", req.ReadinessProbe.Endpoint)
+		}
+	}
+
+	if req.LivenessProbe != nil {
+		if req.LivenessProbe.Endpoint == "" {
+			return errors.New("livenessProbe endpoint cannot be empty")
+		}
+		if !validProbeEndpoints[req.LivenessProbe.Endpoint] {
+			return fmt.Errorf("invalid livenessProbe endpoint: %s. Valid endpoints are: /health", req.LivenessProbe.Endpoint)
+		}
+	}
+
 	return nil
 }
+
+func toTargonProbe(p *Probes, port int32) *TargonProbe {
+	if p == nil {
+		return nil
+	}
+
+	const (
+		defaultInitialDelaySeconds int32 = 3600 //1 hour
+		defaultPeriodSeconds       int32 = 10
+		defaultTimeoutSeconds      int32 = 3
+		defaultSuccessThreshold    int32 = 1
+		defaultFailureThreshold    int32 = 3
+	)
+
+	initialDelay := defaultInitialDelaySeconds
+	if p.InitialDelaySeconds != nil {
+		initialDelay = *p.InitialDelaySeconds
+	}
+
+	period := defaultPeriodSeconds
+	if p.PeriodSeconds != nil {
+		period = *p.PeriodSeconds
+	}
+
+	timeout := defaultTimeoutSeconds
+	if p.TimeoutSeconds != nil {
+		timeout = *p.TimeoutSeconds
+	}
+
+	successThreshold := defaultSuccessThreshold
+	if p.SuccessThreshold != nil {
+		successThreshold = *p.SuccessThreshold
+	}
+
+	failureThreshold := defaultFailureThreshold
+	if p.FailureThreshold != nil {
+		failureThreshold = *p.FailureThreshold
+	}
+
+	return &TargonProbe{
+		HTTPGet: &TargonHTTPGet{
+			Path: p.Endpoint,
+			Port: port,
+		},
+		InitialDelaySeconds: &initialDelay,
+		PeriodSeconds:       &period,
+		TimeoutSeconds:      &timeout,
+		SuccessThreshold:    &successThreshold,
+		FailureThreshold:    &failureThreshold,
+	}
+}
+
 func buildTargonRequest(req CreateModelRequest) (TargonCreateRequest, error) {
 	// Build image
 	version := req.FrameworkVersion
@@ -453,6 +569,9 @@ func buildTargonRequest(req CreateModelRequest) (TargonCreateRequest, error) {
 		}
 	}
 
+	readinessProbe := toTargonProbe(req.ReadinessProbe, port)
+	livenessProbe := toTargonProbe(req.LivenessProbe, port)
+
 	sybilID, err := nanoid.Generate("0123456789abcdefghijklmnopqrstuvwxyz", 10)
 	if err != nil {
 		return TargonCreateRequest{}, errors.New("failed to generate nanoid")
@@ -473,6 +592,8 @@ func buildTargonRequest(req CreateModelRequest) (TargonCreateRequest, error) {
 				Env:              envVars,
 				Ports:            []TargonPort{{ContainerPort: port, Protocol: "TCP"}},
 				SharedMemorySize: sharedMemorySize, // Pass it to Targon
+				ReadinessProbe:   readinessProbe,
+				LivenessProbe:    livenessProbe,
 			},
 			MinReplicas:          &minReplicas,
 			MaxReplicas:          maxReplicas,

@@ -40,6 +40,8 @@ type ContainerUpdate struct {
 	Ports            *[]TargonPort   `json:"ports,omitempty"`
 	Env              *[]TargonEnvVar `json:"env,omitempty"`
 	SharedMemorySize *string         `json:"shared_memory_size,omitempty"`
+	ReadinessProbe   *Probes         `json:"readinessProbe,omitempty"`
+	LivenessProbe    *Probes         `json:"livenessProbe,omitempty"`
 }
 
 // TargonUpdateRequest is what gets sent to Targon API
@@ -102,8 +104,9 @@ func (t *TargonManager) UpdateModel(cc echo.Context) error {
 		"model_id", modelID,
 		"user_id", c.User.UserID)
 
+	var port int32 = currentConfig.Predictor.Container.Ports[0].ContainerPort
 	// Build the Targon update request
-	targonReq := buildTargonUpdateRequest(req)
+	targonReq := buildTargonUpdateRequest(req, port)
 	targonReqJSON, err := json.Marshal(targonReq)
 	if err != nil {
 		t.Log.Errorw("Failed to marshal targon request", "error", err.Error())
@@ -155,7 +158,7 @@ func (t *TargonManager) UpdateModel(cc echo.Context) error {
 		"model_id", modelID)
 
 	// Merge updates into current config to maintain full configuration
-	mergedConfig := mergeConfigs(currentConfig, req)
+	mergedConfig := mergeConfigs(currentConfig, req, port)
 	mergedConfigJSON, err := json.Marshal(mergedConfig)
 	if err != nil {
 		t.Log.Errorw("Failed to marshal merged config", "error", err.Error())
@@ -268,10 +271,37 @@ func validateUpdateModelRequest(req UpdateModelRequest) error {
 		}
 	}
 
+	// Validate readiness and liveness probe
+	validProbeEndpoints := map[string]bool{
+		"/health": true,
+	}
+
+	if req.Predictor != nil && req.Predictor.Container != nil {
+		if req.Predictor.Container.ReadinessProbe != nil {
+			readyP := req.Predictor.Container.ReadinessProbe
+			if readyP.Endpoint == "" {
+				return errors.New("readinessProbe endpoint cannot be empty")
+			}
+			if !validProbeEndpoints[readyP.Endpoint] {
+				return fmt.Errorf("invalid readinessProbe endpoint: %s. Valid endpoints are: /health", readyP.Endpoint)
+			}
+		}
+
+		if req.Predictor.Container.LivenessProbe != nil {
+			liveP := req.Predictor.Container.LivenessProbe
+			if liveP.Endpoint == "" {
+				return errors.New("livenessProbe endpoint cannot be empty")
+			}
+			if !validProbeEndpoints[liveP.Endpoint] {
+				return fmt.Errorf("invalid livenessProbe endpoint: %s. Valid endpoints are: /health", liveP.Endpoint)
+			}
+		}
+	}
+
 	return nil
 }
 
-func mergeConfigs(currentConfig TargonCreateRequest, updateReq UpdateModelRequest) TargonCreateRequest {
+func mergeConfigs(currentConfig TargonCreateRequest, updateReq UpdateModelRequest, port int32) TargonCreateRequest {
 	// Start with current config
 	merged := currentConfig
 
@@ -326,6 +356,12 @@ func mergeConfigs(currentConfig TargonCreateRequest, updateReq UpdateModelReques
 			if updateReq.Predictor.Container.SharedMemorySize != nil {
 				merged.Predictor.Container.SharedMemorySize = updateReq.Predictor.Container.SharedMemorySize
 			}
+			if updateReq.Predictor.Container.ReadinessProbe != nil {
+				merged.Predictor.Container.ReadinessProbe = toTargonProbe(updateReq.Predictor.Container.ReadinessProbe, port)
+			}
+			if updateReq.Predictor.Container.LivenessProbe != nil {
+				merged.Predictor.Container.LivenessProbe = toTargonProbe(updateReq.Predictor.Container.LivenessProbe, port)
+			}
 		}
 	}
 
@@ -355,7 +391,7 @@ func mergeConfigs(currentConfig TargonCreateRequest, updateReq UpdateModelReques
 	return merged
 }
 
-func buildTargonUpdateRequest(req UpdateModelRequest) TargonUpdateRequest {
+func buildTargonUpdateRequest(req UpdateModelRequest, port int32) TargonUpdateRequest {
 	targonReq := TargonUpdateRequest{
 		InferenceUID: req.TargonUID,
 	}
@@ -397,6 +433,12 @@ func buildTargonUpdateRequest(req UpdateModelRequest) TargonUpdateRequest {
 			}
 			if req.Predictor.Container.SharedMemorySize != nil {
 				container.SharedMemorySize = req.Predictor.Container.SharedMemorySize
+			}
+			if req.Predictor.Container.ReadinessProbe != nil {
+				container.ReadinessProbe = toTargonProbe(req.Predictor.Container.ReadinessProbe, port)
+			}
+			if req.Predictor.Container.LivenessProbe != nil {
+				container.LivenessProbe = toTargonProbe(req.Predictor.Container.LivenessProbe, port)
 			}
 
 			predictorUpdate.Container = container
