@@ -15,6 +15,9 @@ import (
 
 	"github.com/aidarkhanov/nanoid"
 	"github.com/labstack/echo/v4"
+
+	corev1 "k8s.io/api/core/v1"
+	intstr "k8s.io/apimachinery/pkg/util/intstr"
 )
 
 type CreateModelRequest struct {
@@ -85,8 +88,8 @@ type TargonCustomInferenceContainer struct {
 	Ports            []TargonPort   `json:"ports,omitempty"`
 	Env              []TargonEnvVar `json:"env,omitempty"`
 	SharedMemorySize *string        `json:"shared_memory_size,omitempty"`
-	ReadinessProbe   *TargonProbe   `json:"readinessProbe,omitempty"`
-	LivenessProbe    *TargonProbe   `json:"livenessProbe,omitempty"`
+	ReadinessProbe   *corev1.Probe  `json:"readinessProbe,omitempty"`
+	LivenessProbe    *corev1.Probe  `json:"livenessProbe,omitempty"`
 }
 
 type TargonPort struct {
@@ -141,32 +144,6 @@ type Probes struct {
 	TimeoutSeconds      *int32 `json:"timeoutSeconds,omitempty"`
 	SuccessThreshold    *int32 `json:"successThreshold,omitempty"`
 	FailureThreshold    *int32 `json:"failureThreshold,omitempty"`
-}
-
-/*
-livenessProbe:
-    httpGet:
-    	path: /health
-    	port: 8000
-    initialDelaySeconds: 900
-    periodSeconds: 10
-    successThreshold: 1
-	failureThreshold: 3
-    timeoutSeconds: 3
-*/
-// To send something like above to Targon API
-type TargonHTTPGet struct {
-	Path string `json:"path,omitempty"`
-	Port int32  `json:"port,omitempty"`
-}
-
-type TargonProbe struct {
-	HTTPGet             *TargonHTTPGet `json:"httpGet,omitempty"`
-	InitialDelaySeconds *int32         `json:"initialDelaySeconds,omitempty"`
-	PeriodSeconds       *int32         `json:"periodSeconds,omitempty"`
-	TimeoutSeconds      *int32         `json:"timeoutSeconds,omitempty"`
-	SuccessThreshold    *int32         `json:"successThreshold,omitempty"`
-	FailureThreshold    *int32         `json:"failureThreshold,omitempty"`
 }
 
 func (t *TargonManager) CreateModel(cc echo.Context) error {
@@ -441,7 +418,7 @@ func validateCreateModelRequest(req CreateModelRequest) error {
 	return nil
 }
 
-func toTargonProbe(p *Probes, port int32) *TargonProbe {
+func toCoreProbe(p *Probes, port int32) *corev1.Probe {
 	if p == nil {
 		return nil
 	}
@@ -479,17 +456,24 @@ func toTargonProbe(p *Probes, port int32) *TargonProbe {
 		failureThreshold = *p.FailureThreshold
 	}
 
-	return &TargonProbe{
-		HTTPGet: &TargonHTTPGet{
-			Path: p.Endpoint,
-			Port: port,
-		},
-		InitialDelaySeconds: &initialDelay,
-		PeriodSeconds:       &period,
-		TimeoutSeconds:      &timeout,
-		SuccessThreshold:    &successThreshold,
-		FailureThreshold:    &failureThreshold,
+	probe := &corev1.Probe{
+		InitialDelaySeconds: initialDelay,
+		PeriodSeconds:       period,
+		TimeoutSeconds:      timeout,
+		SuccessThreshold:    successThreshold,
+		FailureThreshold:    failureThreshold,
 	}
+
+	if p.Endpoint != "" {
+		probe.ProbeHandler = corev1.ProbeHandler{
+			HTTPGet: &corev1.HTTPGetAction{
+				Path: p.Endpoint,
+				Port: intstr.FromInt(int(port)),
+			},
+		}
+	}
+
+	return probe
 }
 
 func buildTargonRequest(req CreateModelRequest) (TargonCreateRequest, error) {
@@ -569,8 +553,8 @@ func buildTargonRequest(req CreateModelRequest) (TargonCreateRequest, error) {
 		}
 	}
 
-	readinessProbe := toTargonProbe(req.ReadinessProbe, port)
-	livenessProbe := toTargonProbe(req.LivenessProbe, port)
+	readinessProbe := toCoreProbe(req.ReadinessProbe, port)
+	livenessProbe := toCoreProbe(req.LivenessProbe, port)
 
 	sybilID, err := nanoid.Generate("0123456789abcdefghijklmnopqrstuvwxyz", 10)
 	if err != nil {

@@ -357,10 +357,10 @@ func mergeConfigs(currentConfig TargonCreateRequest, updateReq UpdateModelReques
 				merged.Predictor.Container.SharedMemorySize = updateReq.Predictor.Container.SharedMemorySize
 			}
 			if updateReq.Predictor.Container.ReadinessProbe != nil {
-				merged.Predictor.Container.ReadinessProbe = toTargonProbe(updateReq.Predictor.Container.ReadinessProbe, port)
+				merged.Predictor.Container.ReadinessProbe = toCoreProbe(updateReq.Predictor.Container.ReadinessProbe, port)
 			}
 			if updateReq.Predictor.Container.LivenessProbe != nil {
-				merged.Predictor.Container.LivenessProbe = toTargonProbe(updateReq.Predictor.Container.LivenessProbe, port)
+				merged.Predictor.Container.LivenessProbe = toCoreProbe(updateReq.Predictor.Container.LivenessProbe, port)
 			}
 		}
 	}
@@ -435,10 +435,10 @@ func buildTargonUpdateRequest(req UpdateModelRequest, port int32) TargonUpdateRe
 				container.SharedMemorySize = req.Predictor.Container.SharedMemorySize
 			}
 			if req.Predictor.Container.ReadinessProbe != nil {
-				container.ReadinessProbe = toTargonProbe(req.Predictor.Container.ReadinessProbe, port)
+				container.ReadinessProbe = toCoreProbe(req.Predictor.Container.ReadinessProbe, port)
 			}
 			if req.Predictor.Container.LivenessProbe != nil {
-				container.LivenessProbe = toTargonProbe(req.Predictor.Container.LivenessProbe, port)
+				container.LivenessProbe = toCoreProbe(req.Predictor.Container.LivenessProbe, port)
 			}
 
 			predictorUpdate.Container = container
