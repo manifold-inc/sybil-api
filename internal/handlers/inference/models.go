@@ -5,11 +5,9 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"sybil-api/internal/setup"
-	"sybil-api/internal/shared"
 	"time"
 
-	"github.com/labstack/echo/v4"
+	"sybil-api/internal/shared"
 )
 
 type Model struct {
@@ -62,70 +60,55 @@ type ModelMetadata struct {
 	MaxInputLength              *int     `json:"max_input_length,omitempty"`
 }
 
-func (im *InferenceManager) Models(cc echo.Context) error {
-	c := cc.(*setup.Context)
+func (im *InferenceHandler) ListModels(ctx context.Context, userID *uint64, logfields map[string]string) ([]Model, error) {
+	log := logWithFields(im.Log, logfields)
 
-	ctx, cancel := context.WithTimeout(c.Request().Context(), 5*time.Second)
-	defer cancel()
-
-	models, err := fetchModels(ctx, im.RDB, c.User, c)
-	if err != nil {
-		c.Log.Errorw("Failed to get models", "error", err.Error())
-		return cc.String(500, "Failed to get models")
-	}
-
-	return c.JSON(200, ModelList{
-		Data: models,
-	})
-}
-
-func fetchModels(ctx context.Context, db *sql.DB, user *shared.UserMetadata, c *setup.Context) ([]Model, error) {
-	baseQuery := `
-		`
-	switch true {
-	case user != nil:
-		if models, err := queryModels(ctx, db, c, baseQuery+`
-				SELECT name, DATE_FORMAT(created_at, '%Y-%m-%d %H:%i:%s') as created,
-					icpt, ocpt, crc, metadata, modality, supported_endpoints
-				FROM model 
-				WHERE enabled = true AND allowed_user_id = ?
-				ORDER BY name ASC`,
-			user.UserID); err == nil && len(models) > 0 {
-			return models, nil
-		} else if err != nil {
-			c.Log.Warnw("Error querying user-specific models, falling back to public", "error", err.Error())
-		}
-		fallthrough
-	default:
-		// public models
-		return queryModels(ctx, db, c, `
+	if userID != nil {
+		userModels, err := im.queryModels(ctx, logfields, `
 			SELECT name, DATE_FORMAT(created_at, '%Y-%m-%d %H:%i:%s') as created,
 				icpt, ocpt, crc, metadata, modality, supported_endpoints
 			FROM model 
-			WHERE enabled = true AND allowed_user_id is NULL
-			ORDER BY name ASC`)
+			WHERE enabled = true AND allowed_user_id = ?
+			ORDER BY name ASC`, *userID)
+
+		if err != nil {
+			log.Warnw("Error querying user-specific models, falling back to public", "error", err.Error())
+		} else if len(userModels) > 0 {
+			return userModels, nil
+		}
 	}
+
+	return im.queryModels(ctx, logfields, `
+		SELECT name, DATE_FORMAT(created_at, '%Y-%m-%d %H:%i:%s') as created,
+			icpt, ocpt, crc, metadata, modality, supported_endpoints
+		FROM model 
+		WHERE enabled = true AND allowed_user_id is NULL
+		ORDER BY name ASC`)
 }
 
-func queryModels(ctx context.Context, db *sql.DB, c *setup.Context, query string, args ...any) ([]Model, error) {
-	rows, err := db.QueryContext(ctx, query, args...)
+func (im *InferenceHandler) queryModels(ctx context.Context, logfields map[string]string, query string, args ...any) ([]Model, error) {
+	log := logWithFields(im.Log, logfields)
+
+	rows, err := im.RDB.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() {
+		_ = rows.Close()
+	}()
 
 	var models []Model
 	for rows.Next() {
 		model, err := scanModel(rows)
 		if err != nil {
-			c.Log.Warnw("Failed to scan model row", "error", err.Error())
+			log.Warnw("Failed to scan model row", "error", err.Error())
 			continue
 		}
 		models = append(models, model)
 	}
 
 	if err := rows.Err(); err != nil {
-		c.Log.Errorw("Error iterating over rows", "error", err.Error())
+		log.Errorw("Error iterating over rows", "error", err.Error())
 		return nil, err
 	}
 

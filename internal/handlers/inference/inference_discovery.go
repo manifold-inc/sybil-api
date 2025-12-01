@@ -18,7 +18,7 @@ type InferenceService struct {
 	Modality string `json:"modality"`
 }
 
-func (im *InferenceManager) DiscoverModels(ctx context.Context, userID uint64, modelName string) (*InferenceService, error) {
+func (im *InferenceHandler) DiscoverModels(ctx context.Context, userID uint64, modelName string) (*InferenceService, error) {
 	cacheKey := fmt.Sprintf("sybil:v1:model:service:%d:%s", userID, modelName)
 	cached, err := im.RedisClient.Get(ctx, cacheKey).Result()
 	if err == nil && cached != "" {
