@@ -157,7 +157,7 @@ func (im *InferenceManager) CompletionRequestNewHistory(cc echo.Context) error {
 
 		log.Infow("Chat history updated with assistant response", "history_id", historyID, "user_id", userID)
 
-		if err := im.updateUserStreak(userID, log); err != nil {
+		if err := im.updateUserStreak(userID); err != nil {
 			log.Errorw("Failed to update user streak", "error", err, "user_id", userID)
 		}
 	}(c.User.UserID, historyID, allMessagesJSON, c.Log)
@@ -232,7 +232,7 @@ func (im *InferenceManager) UpdateHistory(cc echo.Context) error {
 		"user_id", c.User.UserID)
 
 	go func(userID uint64, log *zap.SugaredLogger) {
-		if err := im.updateUserStreak(userID, log); err != nil {
+		if err := im.updateUserStreak(userID); err != nil {
 			log.Errorw("Failed to update user streak", "error", err, "user_id", userID)
 		}
 	}(c.User.UserID, c.Log)
@@ -276,89 +276,39 @@ func extractContentFromStreamingResponse(responseContent string) string {
 	return fullContent.String()
 }
 
-func (im *InferenceManager) updateUserStreak(userID uint64, log *zap.SugaredLogger) error {
-	var lastChatStr sql.NullString
+func (im *InferenceManager) updateUserStreak(userID uint64) error {
+
+	var lastChat time.Time
 	var currentStreak uint64
 
 	err := im.RDB.QueryRow(`
 		SELECT last_chat, streak 
 		FROM user 
 		WHERE id = ?
-	`, userID).Scan(&lastChatStr, &currentStreak)
+	`, userID).Scan(&lastChat, &currentStreak)
 	if err != nil {
 		return fmt.Errorf("failed to get user streak data: %w", err)
 	}
 
-	var lastChat sql.NullTime
-	if lastChatStr.Valid && lastChatStr.String != "" {
-		formats := []string{
-			"2006-01-02 15:04:05",
-			time.RFC3339,
-			"2006-01-02T15:04:05Z07:00",
-			"2006-01-02 15:04:05.000000",
-		}
-
-		var parsedTime time.Time
-		var parseErr error
-		for _, format := range formats {
-			parsedTime, parseErr = time.Parse(format, lastChatStr.String)
-			if parseErr == nil {
-				lastChat = sql.NullTime{Time: parsedTime, Valid: true}
-				break
-			}
-		}
-
-		if parseErr != nil {
-			log.Warnw("Failed to parse last_chat timestamp", "error", parseErr, "value", lastChatStr.String)
-		}
-	}
-
 	now := time.Now()
-	todayMidnight := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+	minutesSinceLastChat := time.Since(lastChat).Hours()
 
 	var newStreak uint64
-	updateStreak := false
-
-	if lastChat.Valid {
-		lastChatDate := lastChat.Time
-		lastChatMidnight := time.Date(lastChatDate.Year(), lastChatDate.Month(), lastChatDate.Day(), 0, 0, 0, 0, lastChatDate.Location())
-
-		if !todayMidnight.Equal(lastChatMidnight) {
-			updateStreak = true
-			expectedDate := lastChatMidnight.AddDate(0, 0, 1)
-			if todayMidnight.Equal(expectedDate) {
-				newStreak = currentStreak + 1
-			} else {
-				newStreak = 1
-			}
-		} else {
-			newStreak = currentStreak
-		}
-	} else {
-		updateStreak = true
+	if minutesSinceLastChat > 48 {
 		newStreak = 1
+	} else if minutesSinceLastChat >= 24 {
+		newStreak = currentStreak + 1
+	} else {
+		newStreak = currentStreak
 	}
 
-	if updateStreak {
-		_, err = im.WDB.Exec(`
-			UPDATE user 
-			SET streak = ?, last_chat = ? 
-			WHERE id = ?
-		`, newStreak, now, userID)
-		if err != nil {
-			return fmt.Errorf("failed to update user streak: %w", err)
-		}
-
-		log.Infow("Updated user streak", "user_id", userID, "streak", newStreak, "last_chat", now)
-	} else {
-		_, err = im.WDB.Exec(`
-			UPDATE user 
-			SET last_chat = ? 
-			WHERE id = ?
-		`, now, userID)
-		if err != nil {
-			return fmt.Errorf("failed to update last_chat: %w", err)
-		}
+	_, err = im.WDB.Exec(`
+		UPDATE user 
+		SET streak = ?, last_chat = ? 
+		WHERE id = ?
+	`, newStreak, now, userID)
+	if err != nil {
+		return fmt.Errorf("failed to update user streak: %w", err)
 	}
 
 	return nil
