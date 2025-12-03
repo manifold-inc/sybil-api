@@ -100,6 +100,7 @@ type Endpoints struct {
 	RESPONSES  string
 }
 
+//TODO: add for images
 var ENDPOINTS = Endpoints{CHAT: "CHAT", COMPLETION: "COMPLETION", EMBEDDING: "EMBEDDING", RESPONSES: "RESPONSES"}
 
 var ROUTES = map[string]string{

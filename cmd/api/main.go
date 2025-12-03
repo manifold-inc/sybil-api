@@ -83,6 +83,7 @@ func main() {
 	inferenceGroup.POST("/completions", inferenceManager.CompletionRequest)
 	inferenceGroup.POST("/embeddings", inferenceManager.EmbeddingRequest)
 	inferenceGroup.POST("/responses", inferenceManager.ResponsesRequest)
+	// TODO: Add three image endpoints (generatations/edits/varitations)
 	inferenceGroup.POST("/chat/history/new", inferenceManager.CompletionRequestNewHistory)
 	inferenceGroup.PATCH("/chat/history/:history_id", inferenceManager.UpdateHistory)
 

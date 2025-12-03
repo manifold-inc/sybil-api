@@ -39,6 +39,8 @@ func (im *InferenceManager) ResponsesRequest(c echo.Context) error {
 	return err
 }
 
+// TODO: Add three endpoints for images with the correct chat type
+
 func (im *InferenceManager) preprocessOpenAIRequest(
 	c *setup.Context,
 	endpoint string,
@@ -70,6 +72,7 @@ func (im *InferenceManager) preprocessOpenAIRequest(
 	// Add model and endpoint to logger context for all subsequent logs
 	c.Log = c.Log.With("model", modelName, "endpoint", endpoint)
 
+	// TODO: validate req body for images dependent on open ai
 	if endpoint == shared.ENDPOINTS.EMBEDDING {
 
 		input, ok := payload["input"]
@@ -179,18 +182,6 @@ func (im *InferenceManager) preprocessOpenAIRequest(
 		payload["stream_options"] = map[string]any{
 			"include_usage": true,
 		}
-	}
-
-	// Log user id 3's request parameters
-	if userInfo.UserID == 3 {
-		c.Log.Infow("User 3 request payload",
-			"model", modelName,
-			"stream", stream,
-			"max_tokens", payload["max_tokens"],
-			"temperature", payload["temperature"],
-			"top_p", payload["top_p"],
-			"frequency_penalty", payload["frequency_penalty"],
-			"presence_penalty", payload["presence_penalty"])
 	}
 
 	// repackage body
