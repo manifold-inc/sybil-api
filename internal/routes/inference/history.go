@@ -70,14 +70,22 @@ func (im *InferenceManager) CompletionRequestNewHistory(cc echo.Context) error {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to prepare history"})
 	}
 
+	settings := map[string]any{}
+	settingsJSON, err := json.Marshal(settings)
+	if err != nil {
+		c.Log.Errorw("Failed to marshal initial settings", "error", err)
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to prepare history"})
+	}
+
 	insertQuery := `
 		INSERT INTO chat_history (
 			user_id,
 			history_id,
 			messages,
 			title,
-			icon
-		) VALUES (?, ?, ?, ?, ?)
+			icon,
+			settings
+		) VALUES (?, ?, ?, ?, ?, ?)
 	`
 
 	_, err = im.WDB.Exec(insertQuery,
@@ -86,6 +94,7 @@ func (im *InferenceManager) CompletionRequestNewHistory(cc echo.Context) error {
 		string(messagesJSON),
 		title,
 		nil, // icon
+		string(settingsJSON),
 	)
 	if err != nil {
 		c.Log.Errorw("Failed to insert history into database", "error", err)
