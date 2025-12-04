@@ -32,4 +32,3 @@ volumes:
   traefik-public-certificates:
   cache:
     driver: local
-
