@@ -357,7 +357,9 @@ func mergeConfigs(currentConfig TargonCreateRequest, updateReq UpdateModelReques
 			}
 
 			var port int32
-			port = merged.Predictor.Container.Ports[0].ContainerPort
+			if len(merged.Predictor.Container.Ports) > 0 {
+				port = merged.Predictor.Container.Ports[0].ContainerPort
+			}
 
 			if updateReq.Predictor.Container.ReadinessProbe != nil {
 				merged.Predictor.Container.ReadinessProbe = toCoreProbe(updateReq.Predictor.Container.ReadinessProbe, port)
@@ -439,7 +441,9 @@ func buildTargonUpdateRequest(req UpdateModelRequest) TargonUpdateRequest {
 			}
 
 			var port int32
-			port = container.Ports[0].ContainerPort
+			if len(container.Ports) > 0 {
+				port = container.Ports[0].ContainerPort
+			}
 
 			if req.Predictor.Container.ReadinessProbe != nil {
 				container.ReadinessProbe = toCoreProbe(req.Predictor.Container.ReadinessProbe, port)
