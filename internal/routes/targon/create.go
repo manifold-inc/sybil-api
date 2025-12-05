@@ -423,45 +423,22 @@ func toCoreProbe(p *Probes, port int32) *corev1.Probe {
 		return nil
 	}
 
-	const (
-		defaultInitialDelaySeconds int32 = 3600 //1 hour
-		defaultPeriodSeconds       int32 = 10
-		defaultTimeoutSeconds      int32 = 3
-		defaultSuccessThreshold    int32 = 1
-		defaultFailureThreshold    int32 = 3
-	)
+	probe := &corev1.Probe{}
 
-	initialDelay := defaultInitialDelaySeconds
 	if p.InitialDelaySeconds != nil {
-		initialDelay = *p.InitialDelaySeconds
+		probe.InitialDelaySeconds = *p.InitialDelaySeconds
 	}
-
-	period := defaultPeriodSeconds
 	if p.PeriodSeconds != nil {
-		period = *p.PeriodSeconds
+		probe.PeriodSeconds = *p.PeriodSeconds
 	}
-
-	timeout := defaultTimeoutSeconds
 	if p.TimeoutSeconds != nil {
-		timeout = *p.TimeoutSeconds
+		probe.TimeoutSeconds = *p.TimeoutSeconds
 	}
-
-	successThreshold := defaultSuccessThreshold
 	if p.SuccessThreshold != nil {
-		successThreshold = *p.SuccessThreshold
+		probe.SuccessThreshold = *p.SuccessThreshold
 	}
-
-	failureThreshold := defaultFailureThreshold
 	if p.FailureThreshold != nil {
-		failureThreshold = *p.FailureThreshold
-	}
-
-	probe := &corev1.Probe{
-		InitialDelaySeconds: initialDelay,
-		PeriodSeconds:       period,
-		TimeoutSeconds:      timeout,
-		SuccessThreshold:    successThreshold,
-		FailureThreshold:    failureThreshold,
+		probe.FailureThreshold = *p.FailureThreshold
 	}
 
 	if p.Endpoint != "" {
