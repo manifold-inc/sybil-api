@@ -107,7 +107,46 @@ func (im *InferenceManager) QueryModels(c *setup.Context, req *shared.RequestInf
 	}
 
 	if err != nil && timeoutOccurred.Load() {
-		c.Log.Warnw("Request timed out - likely due to model cold start")
+		logFields := []interface{}{
+			"model_url", modelMetadata.URL,
+			"timeout_seconds", shared.DefaultStreamRequestTimeout.Seconds(),
+			"http_duration_ms", httpDuration.Milliseconds(),
+			"total_elapsed_ms", time.Since(req.StartTime).Milliseconds(),
+			"preprocessing_ms", preprocessingTime.Milliseconds(),
+			"error", err.Error(),
+			"model", req.Model,
+			"model_id", modelMetadata.ModelID,
+			"endpoint", req.Endpoint,
+			"request_body_size", len(req.Body),
+		}
+
+		if len(req.Body) > 0 {
+			maxBodyLen := 1000
+			reqBodyStr := string(req.Body)
+			if len(reqBodyStr) > maxBodyLen {
+				reqBodyStr = reqBodyStr[:maxBodyLen] + "... (truncated)"
+			}
+			logFields = append(logFields, "request_body", reqBodyStr)
+		}
+
+		if res != nil && res.Body != nil {
+			logFields = append(logFields, "status_code", res.StatusCode)
+			bodyBytes, readErr := io.ReadAll(res.Body)
+			if readErr == nil && len(bodyBytes) > 0 {
+				maxBodyLen := 1000
+				bodyStr := string(bodyBytes)
+				if len(bodyStr) > maxBodyLen {
+					bodyStr = bodyStr[:maxBodyLen] + "... (truncated)"
+				}
+				logFields = append(logFields, "response_body", bodyStr, "response_body_size", len(bodyBytes))
+			} else if readErr != nil {
+				logFields = append(logFields, "body_read_error", readErr.Error())
+			}
+		} else {
+			logFields = append(logFields, "response_available", false)
+		}
+
+		c.Log.Errorw("Request timed out - likely due to model cold start", logFields...)
 		metrics.ErrorCount.WithLabelValues(modelLabel, req.Endpoint, fmt.Sprintf("%d", req.UserID), "cold_start").Inc()
 		return nil, &shared.RequestError{StatusCode: 503, Err: errors.New("cold start detected, please try again in a few minutes")}
 	}
