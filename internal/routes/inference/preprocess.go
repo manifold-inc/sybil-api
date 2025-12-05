@@ -193,6 +193,13 @@ func (im *InferenceManager) preprocessOpenAIRequest(
 			"presence_penalty", payload["presence_penalty"])
 	}
 
+	// if user id is 2, and deepseek v3-0324, set max tokens to 4096 if not provided
+	if userInfo.UserID == 2 && modelName == "deepseek/DeepSeek-V3-0324" {
+		if _, ok := payload["max_tokens"]; !ok {
+			payload["max_tokens"] = 4096
+		}
+	}
+
 	// repackage body
 	body, err = json.Marshal(payload)
 	if err != nil {
