@@ -40,8 +40,6 @@ type ContainerUpdate struct {
 	Ports            *[]TargonPort   `json:"ports,omitempty"`
 	Env              *[]TargonEnvVar `json:"env,omitempty"`
 	SharedMemorySize *string         `json:"shared_memory_size,omitempty"`
-	ReadinessProbe   *Probes         `json:"readinessProbe,omitempty"`
-	LivenessProbe    *Probes         `json:"livenessProbe,omitempty"`
 }
 
 // TargonUpdateRequest is what gets sent to Targon API
@@ -270,33 +268,6 @@ func validateUpdateModelRequest(req UpdateModelRequest) error {
 		}
 	}
 
-	// Validate readiness and liveness probe
-	validProbeEndpoints := map[string]bool{
-		"/health": true,
-	}
-
-	if req.Predictor != nil && req.Predictor.Container != nil {
-		if req.Predictor.Container.ReadinessProbe != nil {
-			readyP := req.Predictor.Container.ReadinessProbe
-			if readyP.Endpoint == "" {
-				return errors.New("readinessProbe endpoint cannot be empty")
-			}
-			if !validProbeEndpoints[readyP.Endpoint] {
-				return fmt.Errorf("invalid readinessProbe endpoint: %s. Valid endpoints are: /health", readyP.Endpoint)
-			}
-		}
-
-		if req.Predictor.Container.LivenessProbe != nil {
-			liveP := req.Predictor.Container.LivenessProbe
-			if liveP.Endpoint == "" {
-				return errors.New("livenessProbe endpoint cannot be empty")
-			}
-			if !validProbeEndpoints[liveP.Endpoint] {
-				return fmt.Errorf("invalid livenessProbe endpoint: %s. Valid endpoints are: /health", liveP.Endpoint)
-			}
-		}
-	}
-
 	return nil
 }
 
@@ -354,18 +325,6 @@ func mergeConfigs(currentConfig TargonCreateRequest, updateReq UpdateModelReques
 			}
 			if updateReq.Predictor.Container.SharedMemorySize != nil {
 				merged.Predictor.Container.SharedMemorySize = updateReq.Predictor.Container.SharedMemorySize
-			}
-
-			var port int32
-			if len(merged.Predictor.Container.Ports) > 0 {
-				port = merged.Predictor.Container.Ports[0].ContainerPort
-			}
-
-			if updateReq.Predictor.Container.ReadinessProbe != nil {
-				merged.Predictor.Container.ReadinessProbe = toCoreProbe(updateReq.Predictor.Container.ReadinessProbe, port)
-			}
-			if updateReq.Predictor.Container.LivenessProbe != nil {
-				merged.Predictor.Container.LivenessProbe = toCoreProbe(updateReq.Predictor.Container.LivenessProbe, port)
 			}
 		}
 	}
@@ -438,18 +397,6 @@ func buildTargonUpdateRequest(req UpdateModelRequest) TargonUpdateRequest {
 			}
 			if req.Predictor.Container.SharedMemorySize != nil {
 				container.SharedMemorySize = req.Predictor.Container.SharedMemorySize
-			}
-
-			var port int32
-			if len(container.Ports) > 0 {
-				port = container.Ports[0].ContainerPort
-			}
-
-			if req.Predictor.Container.ReadinessProbe != nil {
-				container.ReadinessProbe = toCoreProbe(req.Predictor.Container.ReadinessProbe, port)
-			}
-			if req.Predictor.Container.LivenessProbe != nil {
-				container.LivenessProbe = toCoreProbe(req.Predictor.Container.LivenessProbe, port)
 			}
 
 			predictorUpdate.Container = container
