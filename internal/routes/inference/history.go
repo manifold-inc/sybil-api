@@ -133,6 +133,7 @@ func (im *InferenceManager) CompletionRequestNewHistory(cc echo.Context) error {
 		allMessages = append(allMessages, shared.ChatMessage{
 			Role:    "assistant",
 			Content: content,
+			Model:   payload.Model,
 		})
 	}
 
@@ -291,15 +292,15 @@ func (im *InferenceManager) updateUserStreak(userID uint64) error {
 	}
 
 	now := time.Now()
-	minutesSinceLastChat := time.Since(lastChat).Hours()
+	hoursSinceLastChat := time.Since(lastChat).Hours()
 
 	var newStreak uint64
-	if minutesSinceLastChat > 48 {
+	if hoursSinceLastChat > 48 {
 		newStreak = 1
-	} else if minutesSinceLastChat >= 24 {
+	} else if hoursSinceLastChat >= 24 {
 		newStreak = currentStreak + 1
 	} else {
-		newStreak = currentStreak
+		return nil
 	}
 
 	_, err = im.WDB.Exec(`
