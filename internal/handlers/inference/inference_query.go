@@ -56,6 +56,7 @@ func (im *InferenceHandler) QueryModels(input QueryInput) (*shared.ResponseInfo,
 	headers := map[string]string{
 		"Content-Type": "application/json",
 		"Connection":   "keep-alive",
+		"X-Request-ID": input.Req.ID,
 	}
 
 	// Set headers
@@ -114,7 +115,46 @@ func (im *InferenceHandler) QueryModels(input QueryInput) (*shared.ResponseInfo,
 	}
 
 	if err != nil && timeoutOccurred.Load() {
-		newlog.Warnw("Request timed out - likely due to model cold start")
+		logFields := []interface{}{
+			"model_url", modelMetadata.URL,
+			"timeout_seconds", shared.DefaultStreamRequestTimeout.Seconds(),
+			"http_duration_ms", httpDuration.Milliseconds(),
+			"total_elapsed_ms", time.Since(input.Req.StartTime).Milliseconds(),
+			"preprocessing_ms", preprocessingTime.Milliseconds(),
+			"error", err.Error(),
+			"model", input.Req.Model,
+			"model_id", modelMetadata.ModelID,
+			"endpoint", input.Req.Endpoint,
+			"request_body_size", len(input.Req.Body),
+		}
+
+		if len(input.Req.Body) > 0 {
+			maxBodyLen := 1000
+			reqBodyStr := string(input.Req.Body)
+			if len(reqBodyStr) > maxBodyLen {
+				reqBodyStr = reqBodyStr[:maxBodyLen] + "... (truncated)"
+			}
+			logFields = append(logFields, "request_body", reqBodyStr)
+		}
+
+		if res != nil && res.Body != nil {
+			logFields = append(logFields, "status_code", res.StatusCode)
+			bodyBytes, readErr := io.ReadAll(res.Body)
+			if readErr == nil && len(bodyBytes) > 0 {
+				maxBodyLen := 1000
+				bodyStr := string(bodyBytes)
+				if len(bodyStr) > maxBodyLen {
+					bodyStr = bodyStr[:maxBodyLen] + "... (truncated)"
+				}
+				logFields = append(logFields, "response_body", bodyStr, "response_body_size", len(bodyBytes))
+			} else if readErr != nil {
+				logFields = append(logFields, "body_read_error", readErr.Error())
+			}
+		} else {
+			logFields = append(logFields, "response_available", false)
+		}
+
+		newlog.Errorw("Request timed out - likely due to model cold start", logFields...)
 		metrics.ErrorCount.WithLabelValues(modelLabel, input.Req.Endpoint, fmt.Sprintf("%d", input.Req.UserID), "cold_start").Inc()
 		return nil, &shared.RequestError{StatusCode: 503, Err: errors.New("cold start detected, please try again in a few minutes")}
 	}
