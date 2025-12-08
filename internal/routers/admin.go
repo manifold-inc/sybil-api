@@ -3,8 +3,8 @@ package routers
 import (
 	"database/sql"
 
-	"sybil-api/internal/middleware"
 	"sybil-api/internal/handlers/targon"
+	"sybil-api/internal/middleware"
 
 	"github.com/labstack/echo/v4"
 	"github.com/redis/go-redis/v9"
@@ -12,10 +12,14 @@ import (
 )
 
 func RegisterAdminRoutes(e *echo.Group, wdb *sql.DB, rdb *sql.DB, redisClient *redis.Client, log *zap.SugaredLogger) error {
-	targonManager, err := targon.NewTargonManager(wdb, rdb, redisClient, log)
+	targonHandler, err := targon.NewTargonHandler(wdb, rdb, redisClient, log)
 	if err != nil {
 		return err
 	}
+
+	// Create the router (HTTP wrapper) - same pattern as InferenceRouter
+	targonRouter := NewTargonRouter(targonHandler)
+
 	umw, err := middleware.GetUserMiddleware()
 	if err != nil {
 		return err
@@ -23,9 +27,10 @@ func RegisterAdminRoutes(e *echo.Group, wdb *sql.DB, rdb *sql.DB, redisClient *r
 
 	requireAdmin := e.Group("", umw.ExtractUser, umw.RequireAdmin)
 
-	requireAdmin.POST("/models", targonManager.CreateModel)
-	requireAdmin.DELETE("/models/:uid", targonManager.DeleteModel)
-	requireAdmin.PATCH("/models", targonManager.UpdateModel)
+	// Use router methods (which have correct echo.Context signature)
+	requireAdmin.POST("/models", targonRouter.CreateModel)
+	requireAdmin.DELETE("/models/:uid", targonRouter.DeleteModel)
+	requireAdmin.PATCH("/models", targonRouter.UpdateModel)
 
 	return nil
 }

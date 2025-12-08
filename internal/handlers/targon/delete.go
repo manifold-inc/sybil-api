@@ -3,26 +3,21 @@ package targon
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
-	"sybil-api/internal/setup"
 	"sybil-api/internal/shared"
-
-	"github.com/labstack/echo/v4"
 )
 
-func (t *TargonManager) DeleteModel(cc echo.Context) error {
-	c := cc.(*setup.Context)
-
-	modelUID := c.Param("uid")
+func (t *TargonHandler) DeleteModelLogic(input DeleteModelInput) DeleteModelOutput {
 
 	checkQuery := `SELECT id FROM model WHERE targon_uid = ?`
 	var modelID uint64
-	err := t.RDB.QueryRowContext(c.Request().Context(), checkQuery, modelUID).Scan(&modelID)
+	err := t.RDB.QueryRowContext(input.Ctx, checkQuery, input.ModelUID).Scan(&modelID)
 	if err != nil {
-		t.Log.Errorw("Failed to find model", "error", err, "targon_uid", modelUID)
-		return c.JSON(404, "Model not found")
+		t.Log.Errorw("Failed to find model", "error", err, "targon_uid", input.ModelUID)
+		return DeleteModelOutput{Error: errors.New("Model not found"), StatusCode: 404}
 	}
 
 	// cache clear
@@ -43,25 +38,25 @@ func (t *TargonManager) DeleteModel(cc echo.Context) error {
 	}
 
 	// delete from targon
-	err = t.cleanupTargonService(modelUID)
+	err = t.cleanupTargonService(input.ModelUID)
 	if err != nil {
 		t.Log.Warnw("Failed to delete from Targon, continuing with local cleanup",
 			"error", err,
-			"targon_uid", modelUID)
+			"targon_uid", input.ModelUID)
 	}
 
-	_, err = t.WDB.ExecContext(c.Request().Context(),
-		"UPDATE model SET enabled = false WHERE targon_uid = ?", modelUID)
+	_, err = t.WDB.ExecContext(input.Ctx,
+		"UPDATE model SET enabled = false WHERE targon_uid = ?", input.ModelUID)
 	if err != nil {
-		t.Log.Errorw("Failed to soft delete model", "error", err, "targon_uid", modelUID)
-		return c.JSON(500, map[string]string{"error": "Failed to soft delete model"})
+		t.Log.Errorw("Failed to soft delete model", "error", err, "targon_uid", input.ModelUID)
+		return DeleteModelOutput{Error: errors.New("Failed to soft delete model"), StatusCode: 500}
 	}
 
-	_, err = t.WDB.ExecContext(c.Request().Context(),
+	_, err = t.WDB.ExecContext(input.Ctx,
 		"DELETE FROM model_registry WHERE model_id = ?", modelID)
 	if err != nil {
 		t.Log.Errorw("Failed to delete from model registry", "error", err, "model_id", modelID)
-		return c.JSON(500, map[string]string{"error": "Failed to delete model registry"})
+		return DeleteModelOutput{Error: errors.New("Failed to delete model registry"), StatusCode: 500}
 	}
 
 	// cache clear
@@ -83,20 +78,21 @@ func (t *TargonManager) DeleteModel(cc echo.Context) error {
 	}(modelNames, modelID)
 
 	t.Log.Infow("Successfully deleted model",
-		"targon_uid", modelUID,
+		"targon_uid", input.ModelUID,
 		"model_id", modelID,
 		"model_names", modelNames)
 
-	return c.JSON(200, map[string]any{
-		"message":     "Model deleted successfully",
-		"targon_uid":  modelUID,
-		"model_id":    modelID,
-		"model_names": modelNames,
-	})
+	return DeleteModelOutput{
+		ModelID:    modelID,
+		TargonUID:  input.ModelUID,
+		ModelNames: modelNames,
+		Message:    "Model deleted successfully",
+		StatusCode: 200,
+	}
 }
 
 // clean up orphaned Targon service if anything goes wrong
-func (t *TargonManager) cleanupTargonService(targonUID string) error {
+func (t *TargonHandler) cleanupTargonService(targonUID string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), shared.TargonCleanupTimeout)
 	defer cancel()
 

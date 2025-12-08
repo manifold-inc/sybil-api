@@ -14,7 +14,7 @@ import (
 	"go.uber.org/zap"
 )
 
-type TargonManager struct {
+type TargonHandler struct {
 	Log            *zap.SugaredLogger
 	TargonAPIKey   string
 	TargonEndpoint string
@@ -24,7 +24,7 @@ type TargonManager struct {
 	HTTPClient     *http.Client
 }
 
-func NewTargonManager(wdb *sql.DB, rdb *sql.DB, redisClient *redis.Client, log *zap.SugaredLogger) (*TargonManager, error) {
+func NewTargonHandler(wdb *sql.DB, rdb *sql.DB, redisClient *redis.Client, log *zap.SugaredLogger) (*TargonHandler, error) {
 
 	err := wdb.Ping()
 	if err != nil {
@@ -59,7 +59,7 @@ func NewTargonManager(wdb *sql.DB, rdb *sql.DB, redisClient *redis.Client, log *
 	}
 	httpClient := http.Client{Transport: tr, Timeout: 2 * time.Minute}
 
-	return &TargonManager{
+	return &TargonHandler{
 		Log:            log,
 		TargonAPIKey:   targonAPIKey,
 		TargonEndpoint: targonEndpoint,
