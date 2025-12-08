@@ -49,6 +49,7 @@ func (im *InferenceManager) QueryModels(c *setup.Context, req *shared.RequestInf
 	headers := map[string]string{
 		"Content-Type": "application/json",
 		"Connection":   "keep-alive",
+		"X-Request-ID": req.ID,
 	}
 
 	// Set headers
