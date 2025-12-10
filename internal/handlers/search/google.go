@@ -4,7 +4,6 @@ package search
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net/url"
 	"strconv"
@@ -28,40 +27,19 @@ type SearchManager struct {
 	QueryInference       InferenceFunc
 }
 
-func NewSearchManager(queryInference InferenceFunc) (*SearchManager, []error) {
-	var errs []error
-
-	googleSearchEngineID, err := shared.SafeEnv("GOOGLE_SEARCH_ENGINE_ID")
+func NewSearchManager(queryInference InferenceFunc, gseid, gapikey, gacurl string) (*SearchManager, error) {
+	googleService, err := customsearch.NewService(context.Background(), option.WithAPIKey(gapikey))
 	if err != nil {
-		errs = append(errs, err)
-	}
-
-	googleAPIKey, err := shared.SafeEnv("GOOGLE_API_KEY")
-	if err != nil {
-		errs = append(errs, err)
-	}
-
-	googleACURL, err := shared.SafeEnv("GOOGLE_AC_URL")
-	if err != nil {
-		errs = append(errs, err)
-	}
-	googleService, err := customsearch.NewService(context.Background(), option.WithAPIKey(googleAPIKey))
-	if err != nil {
-		return nil, []error{errors.New("failed to connect to google service")}
-	}
-
-	if len(errs) != 0 {
-		return nil, errs
+		return nil, fmt.Errorf("failed to connect to google service: %s", err)
 	}
 
 	return &SearchManager{
-		GoogleSearchEngineID: googleSearchEngineID,
-		GoogleAPIKey:         googleAPIKey,
+		GoogleSearchEngineID: gseid,
+		GoogleAPIKey:         gapikey,
 		GoogleService:        googleService,
-		GoogleACURL:          googleACURL,
+		GoogleACURL:          gacurl,
 		QueryInference:       queryInference,
 	}, nil
-
 }
 
 func QueryGoogleSearch(googleService *customsearch.Service, Log *zap.SugaredLogger, googleSearchEngineID string, query string, page int, searchType ...string) (*shared.SearchResponseBody, error) {

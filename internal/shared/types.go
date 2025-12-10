@@ -9,7 +9,6 @@ type ChatMessage struct {
 	Role    string `json:"role"`
 	Content string `json:"content"`
 	Name    string `json:"name,omitempty"`
-	Model   string `json:"model,omitempty"`
 }
 
 type Response struct {
