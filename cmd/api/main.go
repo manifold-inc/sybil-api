@@ -31,12 +31,13 @@ func main() {
 	metricsAPIKey := flag.String("metrics-api-key", "", "Metrics api key")
 	redisAddr := flag.String("redis-addr", "", "Redis host:port")
 	debug := flag.Bool("debug", false, "Debug enabled")
+	targonAPIKey := flag.String("targon-api-key", "", "Targon API Key")
+	targonEndpoint := flag.String("targon-endpoint", "", "Targon endpoint")
 
 	// Leaving these here, as we will need them when we re-add gsearch
-	//googleSearchEngineID := flag.String("google-search-engine-id", "", "Google search engine id")
-	//googleAPIKey := flag.String("google-api-key", "", "Google search api key")
-	//googleACURL := flag.String("google-ac-url", "", "Google AC URL")
-
+	// googleSearchEngineID := flag.String("google-search-engine-id", "", "Google search engine id")
+	// googleAPIKey := flag.String("google-api-key", "", "Google search api key")
+	// googleACURL := flag.String("google-ac-url", "", "Google AC URL")
 
 	err := eflag.SetFlagsFromEnvironment()
 	if err != nil {
@@ -126,7 +127,7 @@ func main() {
 	middleware.InitUserMiddleware(redisClient, readDB, log)
 
 	// Register routes
-	err = routers.RegisterAdminRoutes(base, writeDB, readDB, redisClient, log)
+	err = routers.RegisterAdminRoutes(base, writeDB, readDB, redisClient, *targonAPIKey, *targonEndpoint, log)
 	if err != nil {
 		panic(err)
 	}

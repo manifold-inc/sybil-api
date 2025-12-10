@@ -7,7 +7,6 @@ import (
 	"errors"
 	"net"
 	"net/http"
-	"sybil-api/internal/shared"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -24,8 +23,7 @@ type TargonHandler struct {
 	HTTPClient     *http.Client
 }
 
-func NewTargonHandler(wdb *sql.DB, rdb *sql.DB, redisClient *redis.Client, log *zap.SugaredLogger) (*TargonHandler, error) {
-
+func NewTargonHandler(wdb *sql.DB, rdb *sql.DB, redisClient *redis.Client, apiKey, url string, log *zap.SugaredLogger) (*TargonHandler, error) {
 	err := wdb.Ping()
 	if err != nil {
 		return nil, errors.New("failed to ping write db")
@@ -41,15 +39,6 @@ func NewTargonHandler(wdb *sql.DB, rdb *sql.DB, redisClient *redis.Client, log *
 		return nil, errors.New("failed to ping redis client")
 	}
 
-	targonAPIKey, err := shared.SafeEnv("TARGON_API_KEY")
-	if err != nil {
-		return nil, errors.New("failed to get targon api key")
-	}
-	targonEndpoint, err := shared.SafeEnv("TARGON_ENDPOINT")
-	if err != nil {
-		return nil, errors.New("failed to get targon endpoint")
-	}
-
 	tr := &http.Transport{
 		Dial: (&net.Dialer{
 			Timeout: 2 * time.Second,
@@ -61,8 +50,8 @@ func NewTargonHandler(wdb *sql.DB, rdb *sql.DB, redisClient *redis.Client, log *
 
 	return &TargonHandler{
 		Log:            log,
-		TargonAPIKey:   targonAPIKey,
-		TargonEndpoint: targonEndpoint,
+		TargonAPIKey:   apiKey,
+		TargonEndpoint: url,
 		WDB:            wdb,
 		RDB:            rdb,
 		RedisClient:    redisClient,

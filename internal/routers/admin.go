@@ -11,8 +11,8 @@ import (
 	"go.uber.org/zap"
 )
 
-func RegisterAdminRoutes(e *echo.Group, wdb *sql.DB, rdb *sql.DB, redisClient *redis.Client, log *zap.SugaredLogger) error {
-	targonHandler, err := targon.NewTargonHandler(wdb, rdb, redisClient, log)
+func RegisterAdminRoutes(e *echo.Group, wdb *sql.DB, rdb *sql.DB, redisClient *redis.Client, targonAPIKey, targonURL string, log *zap.SugaredLogger) error {
+	targonHandler, err := targon.NewTargonHandler(wdb, rdb, redisClient, targonAPIKey, targonURL, log)
 	if err != nil {
 		return err
 	}
