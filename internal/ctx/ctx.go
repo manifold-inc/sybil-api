@@ -1,5 +1,5 @@
-// Package setup server
-package setup
+// Package ctx
+package ctx
 
 import (
 	"sybil-api/internal/shared"

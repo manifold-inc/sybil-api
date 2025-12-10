@@ -6,7 +6,7 @@ import (
 	"errors"
 	"sync"
 
-	"sybil-api/internal/setup"
+	"sybil-api/internal/ctx"
 	"sybil-api/internal/shared"
 
 	"github.com/labstack/echo/v4"
@@ -51,7 +51,7 @@ func NewUserMiddleware(r *redis.Client, rdb *sql.DB, log *zap.SugaredLogger) *Us
 
 func (u *UserMiddleware) ExtractUser(next echo.HandlerFunc) echo.HandlerFunc {
 	return func(cc echo.Context) error {
-		c := cc.(*setup.Context)
+		c := cc.(*ctx.Context)
 		c.User = nil
 
 		apiKey, err := shared.ExtractAPIKey(c)
@@ -70,7 +70,7 @@ func (u *UserMiddleware) ExtractUser(next echo.HandlerFunc) echo.HandlerFunc {
 
 func (u *UserMiddleware) RequireUser(next echo.HandlerFunc) echo.HandlerFunc {
 	return func(cc echo.Context) error {
-		c := cc.(*setup.Context)
+		c := cc.(*ctx.Context)
 		if c.User == nil {
 			return c.String(401, "unauthorized")
 		}
@@ -80,7 +80,7 @@ func (u *UserMiddleware) RequireUser(next echo.HandlerFunc) echo.HandlerFunc {
 
 func (u *UserMiddleware) RequireAdmin(next echo.HandlerFunc) echo.HandlerFunc {
 	return func(cc echo.Context) error {
-		c := cc.(*setup.Context)
+		c := cc.(*ctx.Context)
 		if c.User == nil || c.User.Role != "ADMIN" {
 			return c.String(401, "unauthorized")
 		}

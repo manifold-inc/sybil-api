@@ -5,7 +5,7 @@ import (
 	"time"
 
 	"sybil-api/internal/metrics"
-	"sybil-api/internal/setup"
+	"sybil-api/internal/ctx"
 	"sybil-api/internal/shared"
 
 	"github.com/aidarkhanov/nanoid"
@@ -23,7 +23,7 @@ func NewTrackMiddleware(log *zap.SugaredLogger) echo.MiddlewareFunc {
 			)
 			logger = logger.With("externalid", c.Request().Header.Get("X-Dippy-Request-Id"))
 
-			cc := &setup.Context{Context: c, Log: logger, Reqid: reqID}
+			cc := &ctx.Context{Context: c, Log: logger, Reqid: reqID}
 			start := time.Now()
 			err := next(cc)
 			duration := time.Since(start)

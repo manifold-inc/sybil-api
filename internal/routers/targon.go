@@ -5,8 +5,8 @@ import (
 	"io"
 	"net/http"
 
+	"sybil-api/internal/ctx"
 	"sybil-api/internal/handlers/targon"
-	"sybil-api/internal/setup"
 	"sybil-api/internal/shared"
 
 	"github.com/labstack/echo/v4"
@@ -21,7 +21,7 @@ func NewTargonRouter(th *targon.TargonHandler) *TargonRouter {
 }
 
 func (tr *TargonRouter) CreateModel(cc echo.Context) error {
-	c := cc.(*setup.Context)
+	c := cc.(*ctx.Context)
 
 	// Read and parse request body
 	body, err := io.ReadAll(c.Request().Body)
@@ -57,7 +57,7 @@ func (tr *TargonRouter) CreateModel(cc echo.Context) error {
 }
 
 func (tr *TargonRouter) DeleteModel(cc echo.Context) error {
-	c := cc.(*setup.Context)
+	c := cc.(*ctx.Context)
 
 	output := tr.th.DeleteModelLogic(targon.DeleteModelInput{
 		Ctx:      c.Request().Context(),
@@ -78,7 +78,7 @@ func (tr *TargonRouter) DeleteModel(cc echo.Context) error {
 }
 
 func (tr *TargonRouter) UpdateModel(cc echo.Context) error {
-	c := cc.(*setup.Context)
+	c := cc.(*ctx.Context)
 
 	body, err := io.ReadAll(c.Request().Body)
 	if err != nil {

@@ -9,9 +9,9 @@ import (
 	"net/http"
 	"time"
 
+	"sybil-api/internal/ctx"
 	inferenceRoute "sybil-api/internal/handlers/inference"
 	"sybil-api/internal/middleware"
-	"sybil-api/internal/setup"
 	"sybil-api/internal/shared"
 
 	"github.com/labstack/echo/v4"
@@ -55,7 +55,7 @@ type ModelList struct {
 }
 
 func (ir *InferenceRouter) GetModels(cc echo.Context) error {
-	c := cc.(*setup.Context)
+	c := cc.(*ctx.Context)
 
 	ctx, cancel := context.WithTimeout(c.Request().Context(), 5*time.Second)
 	defer cancel()
@@ -104,7 +104,7 @@ func (ir *InferenceRouter) ResponsesRequest(cc echo.Context) error {
 }
 
 func (ir *InferenceRouter) Inference(cc echo.Context, endpoint string) (string, error) {
-	c := cc.(*Context)
+	c := cc.(*ctx.Context)
 	body, err := readRequestBody(c)
 	if err != nil {
 		return "", c.JSON(http.StatusBadRequest, shared.OpenAIError{
@@ -191,7 +191,7 @@ func (ir *InferenceRouter) Inference(cc echo.Context, endpoint string) (string, 
 }
 
 func (ir *InferenceRouter) CompletionRequestNewHistory(cc echo.Context) error {
-	c := cc.(*Context)
+	c := cc.(*ctx.Context)
 
 	body, err := readRequestBody(c)
 	if err != nil {
@@ -238,7 +238,7 @@ type UpdateHistoryRequest struct {
 
 // UpdateHistory is the HTTP handler wrapper for the history update logic
 func (ir *InferenceRouter) UpdateHistory(cc echo.Context) error {
-	c := cc.(*Context)
+	c := cc.(*ctx.Context)
 
 	body, err := readRequestBody(c)
 	if err != nil {
