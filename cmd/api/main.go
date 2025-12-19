@@ -34,10 +34,9 @@ func main() {
 	targonAPIKey := flag.String("targon-api-key", "", "Targon API Key")
 	targonEndpoint := flag.String("targon-endpoint", "", "Targon endpoint")
 
-	// Leaving these here, as we will need them when we re-add gsearch
-	// googleSearchEngineID := flag.String("google-search-engine-id", "", "Google search engine id")
-	// googleAPIKey := flag.String("google-api-key", "", "Google search api key")
-	// googleACURL := flag.String("google-ac-url", "", "Google AC URL")
+	googleSearchEngineID := flag.String("google-search-engine-id", "", "Google search engine id")
+	googleAPIKey := flag.String("google-api-key", "", "Google search api key")
+	googleACURL := flag.String("google-ac-url", "", "Google AC URL")
 
 	err := eflag.SetFlagsFromEnvironment()
 	if err != nil {
@@ -136,6 +135,19 @@ func main() {
 		panic(err)
 	}
 	defer shutdown()
+
+	if *googleSearchEngineID != "" && *googleAPIKey != "" {
+		searchShutdown, err := routers.RegisterSearchRoutes(base, writeDB, readDB, redisClient, log, *debug, routers.SearchRouterConfig{
+			GoogleSearchEngineID: *googleSearchEngineID,
+			GoogleAPIKey:         *googleAPIKey,
+			GoogleACURL:          *googleACURL,
+		})
+		if err != nil {
+			panic(err)
+		}
+		defer searchShutdown()
+		log.Info("Search routes registered with classification enabled")
+	}
 
 	go func() {
 		if err := e.Start(":80"); err != nil && err != http.ErrServerClosed {

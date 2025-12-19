@@ -6,9 +6,18 @@ import (
 )
 
 type ChatMessage struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
-	Name    string `json:"name,omitempty"`
+	Role    string          `json:"role"`
+	Content string          `json:"content"`
+	Name    string          `json:"name,omitempty"`
+	Model   string          `json:"model,omitempty"`
+	Sources []MessageSource `json:"sources,omitempty"`
+}
+
+type MessageSource struct {
+	Title     string `json:"title,omitempty"`
+	URL       string `json:"url,omitempty"`
+	Content   string `json:"content,omitempty"`
+	Thumbnail string `json:"thumbnail,omitempty"`
 }
 
 type Response struct {
