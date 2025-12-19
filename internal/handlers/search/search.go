@@ -40,9 +40,33 @@ func (s *SearchManager) Search(cc echo.Context) error {
 	c.Response().Header().Set("Connection", "keep-alive")
 	c.Response().Header().Set("X-Accel-Buffering", "no")
 
-	general, err := QueryGoogleSearch(s.GoogleService, c.Log, s.GoogleSearchEngineID, req.Query, 1)
-	if err != nil {
-		return c.String(http.StatusInternalServerError, "")
+	needsSearch := false
+	if s.ClassifySearch != nil {
+		var classifyErr error
+		needsSearch, classifyErr = s.ClassifySearch(req.Query, c.User.UserID)
+		if classifyErr != nil {
+			c.Log.Warnw("Search classification failed, defaulting to no search", "error", classifyErr.Error())
+			needsSearch = false
+		}
+		sendEvent(c, map[string]any{
+			"type":         "classification",
+			"needs_search": needsSearch,
+		})
+	}
+
+	var general *shared.SearchResponseBody
+	if needsSearch {
+		general, err = QueryGoogleSearch(s.GoogleService, c.Log, s.GoogleSearchEngineID, req.Query, 1)
+		if err != nil {
+			return c.String(http.StatusInternalServerError, "")
+		}
+	} else {
+		general = &shared.SearchResponseBody{
+			Query:           req.Query,
+			NumberOfResults: 0,
+			Results:         []shared.SearchResults{},
+			Suggestions:     []string{},
+		}
 	}
 
 	sendEvent(c, map[string]any{

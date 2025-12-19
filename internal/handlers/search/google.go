@@ -19,12 +19,15 @@ import (
 
 type InferenceFunc func(c echo.Context, endpoint string) (string, error)
 
+type ClassifyFunc func(query string, userID uint64) (needsSearch bool, err error)
+
 type SearchManager struct {
 	GoogleSearchEngineID string
 	GoogleAPIKey         string
 	GoogleService        *customsearch.Service
 	GoogleACURL          string
 	QueryInference       InferenceFunc
+	ClassifySearch       ClassifyFunc
 }
 
 func NewSearchManager(queryInference InferenceFunc, gseid, gapikey, gacurl string) (*SearchManager, error) {
