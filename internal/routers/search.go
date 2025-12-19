@@ -43,8 +43,6 @@ func RegisterSearchRoutes(
 		return nil, err
 	}
 
-	inferenceRouter := &InferenceRouter{ih: inferenceHandler}
-
 	classifyFunc := func(query string, userID uint64) (bool, error) {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
@@ -72,7 +70,6 @@ func RegisterSearchRoutes(
 	}
 
 	searchManager, err := search.NewSearchManager(
-		inferenceRouter.Inference,
 		config.GoogleSearchEngineID,
 		config.GoogleAPIKey,
 		config.GoogleACURL,
@@ -85,7 +82,7 @@ func RegisterSearchRoutes(
 
 	searchRouter := &SearchRouter{sm: searchManager}
 
-	searchGroup := e.Group("/search", umw.ExtractUser, umw.RequireUser)
+	searchGroup := e.Group("/v1/search", umw.ExtractUser, umw.RequireUser)
 	searchGroup.POST("", searchRouter.sm.Search)
 	searchGroup.POST("/images", searchRouter.sm.GetImages)
 	searchGroup.POST("/sources", searchRouter.sm.GetSources)

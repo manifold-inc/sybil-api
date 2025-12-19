@@ -1,12 +1,9 @@
 package search
 
 import (
-	"bytes"
 	"encoding/json"
-	"fmt"
 	"io"
 	"net/http"
-	"time"
 
 	"sybil-api/internal/ctx"
 	"sybil-api/internal/shared"
@@ -16,7 +13,13 @@ import (
 
 type searchRequestBody struct {
 	Query string `json:"query"`
-	Model string `json:"model"`
+}
+
+type SearchResponse struct {
+	NeedsSearch bool                   `json:"needs_search"`
+	Query       string                 `json:"query"`
+	Sources     []shared.SearchResults `json:"sources"`
+	Suggestions []string               `json:"suggestions"`
 }
 
 func (s *SearchManager) Search(cc echo.Context) error {
@@ -34,12 +37,6 @@ func (s *SearchManager) Search(cc echo.Context) error {
 		return c.String(http.StatusBadRequest, "invalid JSON format")
 	}
 
-	c.Request().Header.Add("Content-Type", "application/json")
-	c.Response().Header().Set("Content-Type", "text/event-stream; charset=utf-8")
-	c.Response().Header().Set("Cache-Control", "no-cache")
-	c.Response().Header().Set("Connection", "keep-alive")
-	c.Response().Header().Set("X-Accel-Buffering", "no")
-
 	needsSearch := false
 	if s.ClassifySearch != nil {
 		var classifyErr error
@@ -48,105 +45,24 @@ func (s *SearchManager) Search(cc echo.Context) error {
 			c.Log.Warnw("Search classification failed, defaulting to no search", "error", classifyErr.Error())
 			needsSearch = false
 		}
-		sendEvent(c, map[string]any{
-			"type":         "classification",
-			"needs_search": needsSearch,
-		})
 	}
 
-	var general *shared.SearchResponseBody
+	response := SearchResponse{
+		NeedsSearch: needsSearch,
+		Query:       req.Query,
+		Sources:     []shared.SearchResults{},
+		Suggestions: []string{},
+	}
+
 	if needsSearch {
-		general, err = QueryGoogleSearch(s.GoogleService, c.Log, s.GoogleSearchEngineID, req.Query, 1)
+		searchResults, err := QueryGoogleSearch(s.GoogleService, c.Log, s.GoogleSearchEngineID, req.Query, 1)
 		if err != nil {
-			return c.String(http.StatusInternalServerError, "")
+			c.Log.Errorw("Google search failed", "error", err.Error())
+			return c.JSON(http.StatusInternalServerError, map[string]string{"error": "search failed"})
 		}
-	} else {
-		general = &shared.SearchResponseBody{
-			Query:           req.Query,
-			NumberOfResults: 0,
-			Results:         []shared.SearchResults{},
-			Suggestions:     []string{},
-		}
+		response.Sources = searchResults.Results
+		response.Suggestions = searchResults.Suggestions
 	}
 
-	sendEvent(c, map[string]any{
-		"type":    "sources",
-		"sources": general.Results,
-	})
-	sendEvent(c, map[string]any{
-		"type":      "related",
-		"followups": general.Suggestions,
-	})
-
-	llmSources := []string{}
-	if len(general.Results) != 0 {
-		herocard := general.Results[0]
-		llmSources = append(llmSources, fmt.Sprintf("Title: %s:\nSnippet: %s\n", shared.DerefString(general.Results[0].Title), shared.DerefString(general.Results[0].Content)))
-		sendEvent(c, map[string]any{
-			"type": "heroCard",
-			"heroCard": map[string]any{
-				"type": "news",
-				"url":  *herocard.URL,
-				"image": func() any {
-					if herocard.Thumbnail != nil && *herocard.Thumbnail != "" {
-						return *herocard.Thumbnail
-					}
-					return nil
-				}(),
-				"title": *herocard.Title,
-				"intro": *herocard.Content,
-				"size":  "auto",
-			},
-		})
-	}
-
-	// Build inference request
-	now := time.Now()
-	messages := []shared.ChatMessage{
-		{
-			Role: "system",
-			Content: fmt.Sprintf(`### Current Date: %s
-### Instruction: 
-	You are Sybil.com, an expert language model tasked with performing a search over the given query and search results.
-	You are running the text generation on Subnet 4, a bittensor subnet developed by Manifold Labs.
-	Your answer should be short, two paragraphs exactly, and should be relevant to the query.
-
-### Sources:
-%s
-`, now.Format("Mon Jan 2 15:04:05 MST 2006"), llmSources),
-		},
-		{Role: "user", Content: req.Query},
-	}
-
-	inferenceBody := shared.InferenceBody{
-		Messages:    messages,
-		MaxTokens:   3012,
-		Temperature: 0.3,
-		Stream:      true,
-		Model:       req.Model,
-	}
-
-	bodyJSON, err := json.Marshal(inferenceBody)
-	if err != nil {
-		c.Log.Errorw("Failed to marshal inference request", "error", err)
-		return c.String(http.StatusInternalServerError, "failed to create inference request")
-	}
-
-	c.Request().Body = io.NopCloser(bytes.NewReader(bodyJSON))
-
-	_, err = s.QueryInference(c, shared.ENDPOINTS.CHAT)
-	if err != nil {
-		c.Log.Errorw("Failed to query inference", "error", err)
-		return c.String(http.StatusInternalServerError, "inference failed")
-	}
-
-	c.Log.Infoln("Finished")
-	return c.String(http.StatusOK, "finished")
-}
-
-func sendEvent(c *ctx.Context, data map[string]any) {
-	// Send in OpenAI streaming format (data: {json})
-	eventData, _ := json.Marshal(data)
-	fmt.Fprintf(c.Response(), "data: %s\n\n", string(eventData))
-	c.Response().Flush()
+	return c.JSON(http.StatusOK, response)
 }
