@@ -43,7 +43,7 @@ func RegisterSearchRoutes(
 		return nil, err
 	}
 
-	classifyFunc := func(query string, userID uint64) (bool, error) {
+	classifyFunc := func(query string, userID uint64) (*search.ClassifyResult, error) {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 
@@ -56,7 +56,11 @@ func RegisterSearchRoutes(
 		})
 		if err != nil {
 			log.Warnw("Classification error, defaulting to no search", "error", err)
-			return false, nil
+			return &search.ClassifyResult{
+				NeedsSearch: false,
+				Reason:      "classification error",
+				Confidence:  "low",
+			}, nil
 		}
 
 		log.Infow("Search classification result",
@@ -66,7 +70,11 @@ func RegisterSearchRoutes(
 			"confidence", result.Confidence,
 		)
 
-		return result.NeedsSearch, nil
+		return &search.ClassifyResult{
+			NeedsSearch: result.NeedsSearch,
+			Reason:      result.Reason,
+			Confidence:  result.Confidence,
+		}, nil
 	}
 
 	searchManager, err := search.NewSearchManager(
@@ -83,6 +91,7 @@ func RegisterSearchRoutes(
 	searchRouter := &SearchRouter{sm: searchManager}
 
 	searchGroup := e.Group("/v1/search", umw.ExtractUser, umw.RequireUser)
+	searchGroup.POST("/classify", searchRouter.sm.Classify)
 	searchGroup.POST("", searchRouter.sm.Search)
 	searchGroup.POST("/images", searchRouter.sm.GetImages)
 	searchGroup.POST("/sources", searchRouter.sm.GetSources)

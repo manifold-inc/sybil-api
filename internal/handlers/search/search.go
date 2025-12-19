@@ -2,8 +2,10 @@ package search
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
+	"strings"
 
 	"sybil-api/internal/ctx"
 	"sybil-api/internal/shared"
@@ -16,10 +18,9 @@ type searchRequestBody struct {
 }
 
 type SearchResponse struct {
-	NeedsSearch bool                   `json:"needs_search"`
-	Query       string                 `json:"query"`
-	Sources     []shared.SearchResults `json:"sources"`
-	Suggestions []string               `json:"suggestions"`
+	Query   string                 `json:"query"`
+	Context string                 `json:"context"`
+	Sources []shared.SearchResults `json:"sources"`
 }
 
 func (s *SearchManager) Search(cc echo.Context) error {
@@ -37,32 +38,64 @@ func (s *SearchManager) Search(cc echo.Context) error {
 		return c.String(http.StatusBadRequest, "invalid JSON format")
 	}
 
-	needsSearch := false
-	if s.ClassifySearch != nil {
-		var classifyErr error
-		needsSearch, classifyErr = s.ClassifySearch(req.Query, c.User.UserID)
-		if classifyErr != nil {
-			c.Log.Warnw("Search classification failed, defaulting to no search", "error", classifyErr.Error())
-			needsSearch = false
-		}
+	if req.Query == "" {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "query is required"})
 	}
+
+	searchResults, err := QueryGoogleSearch(s.GoogleService, c.Log, s.GoogleSearchEngineID, req.Query, 1)
+	if err != nil {
+		c.Log.Errorw("Google search failed", "error", err.Error())
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "search failed"})
+	}
+
+	// Format context for the model from search results
+	context := formatSearchContext(searchResults.Results)
 
 	response := SearchResponse{
-		NeedsSearch: needsSearch,
-		Query:       req.Query,
-		Sources:     []shared.SearchResults{},
-		Suggestions: []string{},
-	}
-
-	if needsSearch {
-		searchResults, err := QueryGoogleSearch(s.GoogleService, c.Log, s.GoogleSearchEngineID, req.Query, 1)
-		if err != nil {
-			c.Log.Errorw("Google search failed", "error", err.Error())
-			return c.JSON(http.StatusInternalServerError, map[string]string{"error": "search failed"})
-		}
-		response.Sources = searchResults.Results
-		response.Suggestions = searchResults.Suggestions
+		Query:   req.Query,
+		Context: context,
+		Sources: searchResults.Results,
 	}
 
 	return c.JSON(http.StatusOK, response)
+}
+
+// formatSearchContext creates a formatted string from search results
+// that can be used as context for an LLM
+func formatSearchContext(results []shared.SearchResults) string {
+	if len(results) == 0 {
+		return ""
+	}
+
+	var sb strings.Builder
+	sb.WriteString("Search Results:\n\n")
+
+	for i, result := range results {
+		sb.WriteString(fmt.Sprintf("[%d] ", i+1))
+
+		if result.Title != nil && *result.Title != "" {
+			sb.WriteString(*result.Title)
+			sb.WriteString("\n")
+		}
+
+		if result.URL != nil && *result.URL != "" {
+			sb.WriteString("URL: ")
+			sb.WriteString(*result.URL)
+			sb.WriteString("\n")
+		}
+
+		if result.Content != nil && *result.Content != "" {
+			sb.WriteString(*result.Content)
+			sb.WriteString("\n")
+		}
+
+		if result.Metadata != nil && *result.Metadata != "" {
+			sb.WriteString(*result.Metadata)
+			sb.WriteString("\n")
+		}
+
+		sb.WriteString("\n")
+	}
+
+	return strings.TrimSpace(sb.String())
 }
