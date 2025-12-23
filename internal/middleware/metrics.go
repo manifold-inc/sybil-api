@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"time"
 
-	"sybil-api/internal/metrics"
 	"sybil-api/internal/ctx"
+	"sybil-api/internal/metrics"
 	"sybil-api/internal/shared"
 
 	"github.com/aidarkhanov/nanoid"
@@ -21,13 +21,15 @@ func NewTrackMiddleware(log *zap.SugaredLogger) echo.MiddlewareFunc {
 			logger := log.With(
 				"request_id", "req_"+reqID,
 			)
-			logger = logger.With("externalid", c.Request().Header.Get("X-Dippy-Request-Id"))
+			externalID := c.Request().Header.Get("X-External-Request-Id")
+			logger = logger.With("externalid", externalID)
 
-			cc := &ctx.Context{Context: c, Log: logger, Reqid: reqID}
 			start := time.Now()
+			cc := &ctx.Context{Context: c, Log: logger, Reqid: reqID, LogValues: &ctx.ContextLogValues{RequestID: reqID, ExternalID: externalID, StartTime: start, Path: c.Path()}}
 			err := next(cc)
-			duration := time.Since(start)
-			cc.Log.Infow("end_of_request", "status_code", fmt.Sprintf("%d", cc.Response().Status), "duration", duration.String())
+			cc.LogValues.RequestDuration = time.Since(start)
+			cc.LogValues.StatusCode = cc.Response().Status
+			cc.Log.Infow("end_of_request", zap.Object("log_values", cc.LogValues))
 			metrics.ResponseCodes.WithLabelValues(cc.Path(), fmt.Sprintf("%d", cc.Response().Status)).Inc()
 			return err
 		}

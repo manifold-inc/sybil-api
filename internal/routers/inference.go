@@ -15,6 +15,7 @@ import (
 	"sybil-api/internal/shared"
 
 	"github.com/labstack/echo/v4"
+	"github.com/manifold-inc/manifold-sdk/lib/utils"
 	"github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
 )
@@ -60,21 +61,14 @@ func (ir *InferenceRouter) GetModels(cc echo.Context) error {
 	ctx, cancel := context.WithTimeout(c.Request().Context(), 5*time.Second)
 	defer cancel()
 
-	logfields := map[string]string{
-		"endpoint": "models",
-	}
-	if c.User != nil {
-		logfields["user_id"] = fmt.Sprintf("%d", c.User.UserID)
-	}
-
 	var userID *uint64
 	if c.User != nil {
 		userID = &c.User.UserID
 	}
 
-	models, err := ir.ih.ListModels(ctx, userID, logfields)
+	models, err := ir.ih.ListModels(ctx, userID)
 	if err != nil {
-		c.Log.Errorw("Failed to get models", "error", err.Error())
+		c.LogValues.Error = utils.Wrap("failed to get models", c.LogValues.Error, err)
 		return cc.String(500, "Failed to get models")
 	}
 
