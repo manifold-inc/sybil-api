@@ -5,7 +5,7 @@ import (
 	"io"
 	"net/http"
 
-	"sybil-api/internal/setup"
+	"sybil-api/internal/ctx"
 
 	"github.com/labstack/echo/v4"
 )
@@ -16,7 +16,7 @@ type searchImageRequestBody struct {
 }
 
 func (s *SearchManager) GetImages(cc echo.Context) error {
-	c := cc.(*setup.Context)
+	c := cc.(*ctx.Context)
 
 	body, err := io.ReadAll(c.Request().Body)
 	if err != nil {

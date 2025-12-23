@@ -8,7 +8,7 @@ import (
 	"net/http"
 	"time"
 
-	"sybil-api/internal/setup"
+	"sybil-api/internal/ctx"
 	"sybil-api/internal/shared"
 
 	"github.com/labstack/echo/v4"
@@ -20,7 +20,7 @@ type searchRequestBody struct {
 }
 
 func (s *SearchManager) Search(cc echo.Context) error {
-	c := cc.(*setup.Context)
+	c := cc.(*ctx.Context)
 
 	body, err := io.ReadAll(c.Request().Body)
 	if err != nil {
@@ -120,7 +120,7 @@ func (s *SearchManager) Search(cc echo.Context) error {
 	return c.String(http.StatusOK, "finished")
 }
 
-func sendEvent(c *setup.Context, data map[string]any) {
+func sendEvent(c *ctx.Context, data map[string]any) {
 	// Send in OpenAI streaming format (data: {json})
 	eventData, _ := json.Marshal(data)
 	fmt.Fprintf(c.Response(), "data: %s\n\n", string(eventData))

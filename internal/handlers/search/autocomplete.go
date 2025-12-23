@@ -8,13 +8,13 @@ import (
 	"net/url"
 	"time"
 
-	"sybil-api/internal/setup"
+	"sybil-api/internal/ctx"
 
 	"github.com/labstack/echo/v4"
 )
 
 func (s *SearchManager) GetAutocomplete(cc echo.Context) error {
-	c := cc.(*setup.Context)
+	c := cc.(*ctx.Context)
 	query := c.QueryParam("q")
 	if query == "" {
 		return c.JSON(http.StatusOK, []string{})
@@ -28,7 +28,7 @@ func (s *SearchManager) GetAutocomplete(cc echo.Context) error {
 	return c.JSON(http.StatusOK, suggestions)
 }
 
-func queryGoogleAutocomplete(c *setup.Context, googleACURL string, query string) ([]any, error) {
+func queryGoogleAutocomplete(c *ctx.Context, googleACURL string, query string) ([]any, error) {
 	// google autocomplete endpoint
 	url := fmt.Sprintf("%s?client=firefox&q=%s", googleACURL, url.QueryEscape(query))
 

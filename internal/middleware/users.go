@@ -1,4 +1,4 @@
-package auth
+package middleware
 
 import (
 	"context"
@@ -9,7 +9,7 @@ import (
 	"sybil-api/internal/shared"
 )
 
-func (u *UserManager) getUserMetadataFromKey(apiKey string, ctx context.Context) (*shared.UserMetadata, error) {
+func (u *UserMiddleware) getUserMetadataFromKey(apiKey string, ctx context.Context) (*shared.UserMetadata, error) {
 	var userMetadata shared.UserMetadata
 	userMetadata.APIKey = apiKey
 

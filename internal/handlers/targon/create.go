@@ -9,15 +9,10 @@ import (
 	"io"
 	"net/http"
 	"strings"
-	"sybil-api/internal/setup"
 	"sybil-api/internal/shared"
 	"time"
 
 	"github.com/aidarkhanov/nanoid"
-	"github.com/labstack/echo/v4"
-
-	corev1 "k8s.io/api/core/v1"
-	intstr "k8s.io/apimachinery/pkg/util/intstr"
 )
 
 type CreateModelRequest struct {
@@ -44,9 +39,6 @@ type CreateModelRequest struct {
 	ContainerConcurrency *int64  `json:"containerConcurrency,omitempty"`
 	TimeoutSeconds       *int64  `json:"timeoutSeconds,omitempty"`
 	SharedMemorySize     *string `json:"shared_memory_size,omitempty"`
-
-	ReadinessProbe *Probes `json:"readinessProbe,omitempty"`
-	LivenessProbe  *Probes `json:"livenessProbe,omitempty"`
 }
 
 type ScalingConfig struct {
@@ -88,8 +80,6 @@ type TargonCustomInferenceContainer struct {
 	Ports            []TargonPort   `json:"ports,omitempty"`
 	Env              []TargonEnvVar `json:"env,omitempty"`
 	SharedMemorySize *string        `json:"shared_memory_size,omitempty"`
-	ReadinessProbe   *corev1.Probe  `json:"readinessProbe,omitempty"`
-	LivenessProbe    *corev1.Probe  `json:"livenessProbe,omitempty"`
 }
 
 type TargonPort struct {
@@ -136,45 +126,22 @@ type TargonServiceStatusResponse struct {
 	} `json:"status"`
 }
 
-// User defined, from json curl request
-type Probes struct {
-	Endpoint            string `json:"endpoint"` // e.g. "/health", "/metrics" etc.
-	InitialDelaySeconds *int32 `json:"initialDelaySeconds,omitempty"`
-	PeriodSeconds       *int32 `json:"periodSeconds,omitempty"`
-	TimeoutSeconds      *int32 `json:"timeoutSeconds,omitempty"`
-	SuccessThreshold    *int32 `json:"successThreshold,omitempty"`
-	FailureThreshold    *int32 `json:"failureThreshold,omitempty"`
-}
+func (t *TargonHandler) CreateModelLogic(input CreateModelInput) CreateModelOutput {
 
-func (t *TargonManager) CreateModel(cc echo.Context) error {
-	c := cc.(*setup.Context)
-
-	var req CreateModelRequest
-	body, err := io.ReadAll(c.Request().Body)
-	if err != nil {
-		t.Log.Errorw("Failed to read request body", "error", err.Error())
-		return c.JSON(http.StatusInternalServerError, shared.ErrInternalServerError)
-	}
-
-	if err := json.Unmarshal(body, &req); err != nil {
-		t.Log.Errorw("Failed to unmarshal request body", "error", err.Error())
-		return c.JSON(http.StatusInternalServerError, shared.ErrInternalServerError)
-	}
-
-	if err := validateCreateModelRequest(req); err != nil {
+	if err := validateCreateModelRequest(input.Req); err != nil {
 		t.Log.Errorw("Failed to validate request", "error", err.Error())
-		return c.JSON(http.StatusBadRequest, err)
+		return CreateModelOutput{Error: err, StatusCode: http.StatusBadRequest}
 	}
 
 	t.Log.Infow("Creating model",
-		"name", req.BaseModel,
-		"framework", req.Framework,
-		"user_id", c.User.UserID)
+		"name", input.Req.BaseModel,
+		"framework", input.Req.Framework,
+		"user_id", input.UserID)
 
-	targonReq, err := buildTargonRequest(req)
+	targonReq, err := buildTargonRequest(input.Req)
 	if err != nil {
 		t.Log.Errorw("Failed to build targon request", "error", err.Error())
-		return c.JSON(http.StatusInternalServerError, shared.ErrInternalServerError)
+		return CreateModelOutput{Error: shared.ErrInternalServerError.Err, StatusCode: http.StatusInternalServerError}
 	}
 	t.Log.Infow("Targon request built", "request", targonReq)
 
@@ -182,7 +149,7 @@ func (t *TargonManager) CreateModel(cc echo.Context) error {
 	targonReqJSON, err := json.Marshal(targonReq)
 	if err != nil {
 		t.Log.Errorw("Failed to marshal targon request", "error", err.Error())
-		return c.JSON(http.StatusInternalServerError, shared.ErrInternalServerError)
+		return CreateModelOutput{Error: shared.ErrInternalServerError.Err, StatusCode: http.StatusInternalServerError}
 	}
 	t.Log.Infow("Targon request marshalled", "request", string(targonReqJSON))
 
@@ -190,7 +157,7 @@ func (t *TargonManager) CreateModel(cc echo.Context) error {
 	httpReq, err := http.NewRequest("POST", url, bytes.NewBuffer(targonReqJSON))
 	if err != nil {
 		t.Log.Errorw("Failed to create http request", "error", err.Error())
-		return c.JSON(http.StatusInternalServerError, shared.ErrInternalServerError)
+		return CreateModelOutput{Error: shared.ErrInternalServerError.Err, StatusCode: http.StatusInternalServerError}
 	}
 	httpReq.Header.Set("Authorization", fmt.Sprintf("Bearer %s", t.TargonAPIKey))
 	httpReq.Header.Set("Content-Type", "application/json")
@@ -198,7 +165,7 @@ func (t *TargonManager) CreateModel(cc echo.Context) error {
 	res, err := t.HTTPClient.Do(httpReq)
 	if err != nil {
 		t.Log.Errorw("Failed to do http request", "error", err.Error())
-		return c.JSON(http.StatusInternalServerError, shared.ErrInternalServerError)
+		return CreateModelOutput{Error: shared.ErrInternalServerError.Err, StatusCode: http.StatusInternalServerError}
 	}
 	defer func() {
 		if closeErr := res.Body.Close(); closeErr != nil {
@@ -209,18 +176,18 @@ func (t *TargonManager) CreateModel(cc echo.Context) error {
 	resBody, err := io.ReadAll(res.Body)
 	if err != nil {
 		t.Log.Errorw("Failed to read response body", "error", err.Error())
-		return c.JSON(http.StatusInternalServerError, shared.ErrInternalServerError)
+		return CreateModelOutput{Error: shared.ErrInternalServerError.Err, StatusCode: http.StatusInternalServerError}
 	}
 
 	if res.StatusCode != http.StatusOK {
 		t.Log.Errorw("Targon returned error", "status", res.StatusCode, "body", string(resBody))
-		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "targon service creation failed"})
+		return CreateModelOutput{Error: shared.ErrInternalServerError.Err, StatusCode: http.StatusInternalServerError}
 	}
 
 	var targonResp TargonServiceResponse
 	if err := json.Unmarshal(resBody, &targonResp); err != nil {
 		t.Log.Errorw("Failed to parse Targon response", "error", err.Error())
-		return c.JSON(http.StatusInternalServerError, shared.ErrInternalServerError)
+		return CreateModelOutput{Error: shared.ErrInternalServerError.Err, StatusCode: http.StatusInternalServerError}
 	}
 
 	t.Log.Infow("Targon service created",
@@ -228,31 +195,31 @@ func (t *TargonManager) CreateModel(cc echo.Context) error {
 		"namespace", targonResp.Namespace)
 
 	icpt, ocpt, crc := uint64(100), uint64(200), uint64(50)
-	if req.Pricing != nil {
-		icpt = req.Pricing.ICPT
-		ocpt = req.Pricing.OCPT
-		crc = req.Pricing.CRC
+	if input.Req.Pricing != nil {
+		icpt = input.Req.Pricing.ICPT
+		ocpt = input.Req.Pricing.OCPT
+		crc = input.Req.Pricing.CRC
 	}
 
 	// Marshal supported_endpoints to JSON
-	supportedEndpointsJSON, err := json.Marshal(req.SupportedEndpoints)
+	supportedEndpointsJSON, err := json.Marshal(input.Req.SupportedEndpoints)
 	if err != nil {
 		t.Log.Errorw("Failed to marshal supported_endpoints", "error", err)
-		return c.JSON(http.StatusInternalServerError, shared.ErrInternalServerError)
+		return CreateModelOutput{Error: shared.ErrInternalServerError.Err, StatusCode: http.StatusInternalServerError}
 	}
 
 	var allowedUserID *uint64
-	if req.AllowedUserID > 0 {
-		allowedUserID = &req.AllowedUserID
+	if input.Req.AllowedUserID > 0 {
+		allowedUserID = &input.Req.AllowedUserID
 	}
 
 	// Marshal metadata to JSON
 	var metadataJSON []byte
-	if req.Metadata != nil {
-		metadataJSON, err = json.Marshal(req.Metadata)
+	if input.Req.Metadata != nil {
+		metadataJSON, err = json.Marshal(input.Req.Metadata)
 		if err != nil {
 			t.Log.Errorw("Failed to marshal metadata", "error", err)
-			return c.JSON(http.StatusInternalServerError, shared.ErrInternalServerError)
+			return CreateModelOutput{Error: shared.ErrInternalServerError.Err, StatusCode: http.StatusInternalServerError}
 		}
 	}
 
@@ -273,7 +240,7 @@ func (t *TargonManager) CreateModel(cc echo.Context) error {
 		) VALUES (
 		 ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`
-	result, err := t.WDB.ExecContext(c.Request().Context(), insertModelsQuery, req.BaseModel, req.Modality, icpt, ocpt, crc, req.Description, string(supportedEndpointsJSON), allowedUserID, string(metadataJSON), false, string(targonReqJSON), targonResp.UID)
+	result, err := t.WDB.ExecContext(input.Ctx, insertModelsQuery, input.Req.BaseModel, input.Req.Modality, icpt, ocpt, crc, input.Req.Description, string(supportedEndpointsJSON), allowedUserID, string(metadataJSON), false, string(targonReqJSON), targonResp.UID)
 	if err != nil {
 		t.Log.Errorw("Failed to insert model into database", "error", err)
 		// Try to cleanup the orphaned Targon service
@@ -281,28 +248,29 @@ func (t *TargonManager) CreateModel(cc echo.Context) error {
 		if err != nil {
 			t.Log.Errorw("Failed to cleanup orphaned Targon service", "error", err)
 		}
-		return c.JSON(http.StatusInternalServerError, shared.ErrInternalServerError)
+		return CreateModelOutput{Error: shared.ErrInternalServerError.Err, StatusCode: http.StatusInternalServerError}
 	}
 	modelID, err := result.LastInsertId()
 	if err != nil {
 		t.Log.Errorw("Failed to get last insert id", "error", err)
-		return c.JSON(http.StatusInternalServerError, shared.ErrInternalServerError)
+		return CreateModelOutput{Error: shared.ErrInternalServerError.Err, StatusCode: http.StatusInternalServerError}
 	}
-	t.Log.Infow("Model inserted into database", "model", req.BaseModel, "model_id", modelID)
+	t.Log.Infow("Model inserted into database", "model", input.Req.BaseModel, "model_id", modelID)
 
-	modelNames := req.SupportedModelNames
-	modelNames = append(modelNames, req.BaseModel)
+	modelNames := input.Req.SupportedModelNames
+	modelNames = append(modelNames, input.Req.BaseModel)
 
 	go t.pollAndEnableModel(context.Background(), targonResp.UID, modelNames, uint64(modelID),
-		icpt, ocpt, crc, req.Modality, req.AllowedUserID)
+		icpt, ocpt, crc, input.Req.Modality, input.Req.AllowedUserID)
 
-	return c.JSON(http.StatusOK, map[string]any{
-		"model_id":   modelID,
-		"targon_uid": targonResp.UID,
-		"name":       targonResp.Name,
-		"status":     "creating",
-		"message":    "Model creation initiated. Polling targon for status.",
-	})
+	return CreateModelOutput{
+		ModelID:    modelID,
+		TargonUID:  targonResp.UID,
+		Name:       targonResp.Name,
+		Status:     "creating",
+		Message:    "Model creation initiated. Polling targon for status.",
+		StatusCode: 200,
+	}
 
 }
 
@@ -392,90 +360,8 @@ func validateCreateModelRequest(req CreateModelRequest) error {
 		}
 	}
 
-	//TODO: Add more endpoints
-	validProbeEndpoints := map[string]bool{
-		"/health": true,
-	}
-
-	if req.ReadinessProbe != nil {
-		if req.ReadinessProbe.Endpoint == "" {
-			return errors.New("readinessProbe endpoint cannot be empty")
-		}
-		if !validProbeEndpoints[req.ReadinessProbe.Endpoint] {
-			return fmt.Errorf("invalid readinessProbe endpoint: %s. Valid endpoints are: /health", req.ReadinessProbe.Endpoint)
-		}
-	}
-
-	if req.LivenessProbe != nil {
-		if req.LivenessProbe.Endpoint == "" {
-			return errors.New("livenessProbe endpoint cannot be empty")
-		}
-		if !validProbeEndpoints[req.LivenessProbe.Endpoint] {
-			return fmt.Errorf("invalid livenessProbe endpoint: %s. Valid endpoints are: /health", req.LivenessProbe.Endpoint)
-		}
-	}
-
 	return nil
 }
-
-func toCoreProbe(p *Probes, port int32) *corev1.Probe {
-	if p == nil {
-		return nil
-	}
-
-	const (
-		defaultInitialDelaySeconds int32 = 3600 //1 hour
-		defaultPeriodSeconds       int32 = 10
-		defaultTimeoutSeconds      int32 = 3
-		defaultSuccessThreshold    int32 = 1
-		defaultFailureThreshold    int32 = 3
-	)
-
-	initialDelay := defaultInitialDelaySeconds
-	if p.InitialDelaySeconds != nil {
-		initialDelay = *p.InitialDelaySeconds
-	}
-
-	period := defaultPeriodSeconds
-	if p.PeriodSeconds != nil {
-		period = *p.PeriodSeconds
-	}
-
-	timeout := defaultTimeoutSeconds
-	if p.TimeoutSeconds != nil {
-		timeout = *p.TimeoutSeconds
-	}
-
-	successThreshold := defaultSuccessThreshold
-	if p.SuccessThreshold != nil {
-		successThreshold = *p.SuccessThreshold
-	}
-
-	failureThreshold := defaultFailureThreshold
-	if p.FailureThreshold != nil {
-		failureThreshold = *p.FailureThreshold
-	}
-
-	probe := &corev1.Probe{
-		InitialDelaySeconds: initialDelay,
-		PeriodSeconds:       period,
-		TimeoutSeconds:      timeout,
-		SuccessThreshold:    successThreshold,
-		FailureThreshold:    failureThreshold,
-	}
-
-	if p.Endpoint != "" {
-		probe.ProbeHandler = corev1.ProbeHandler{
-			HTTPGet: &corev1.HTTPGetAction{
-				Path: p.Endpoint,
-				Port: intstr.FromInt(int(port)),
-			},
-		}
-	}
-
-	return probe
-}
-
 func buildTargonRequest(req CreateModelRequest) (TargonCreateRequest, error) {
 	// Build image
 	version := req.FrameworkVersion
@@ -553,9 +439,6 @@ func buildTargonRequest(req CreateModelRequest) (TargonCreateRequest, error) {
 		}
 	}
 
-	readinessProbe := toCoreProbe(req.ReadinessProbe, port)
-	livenessProbe := toCoreProbe(req.LivenessProbe, port)
-
 	sybilID, err := nanoid.Generate("0123456789abcdefghijklmnopqrstuvwxyz", 10)
 	if err != nil {
 		return TargonCreateRequest{}, errors.New("failed to generate nanoid")
@@ -576,8 +459,6 @@ func buildTargonRequest(req CreateModelRequest) (TargonCreateRequest, error) {
 				Env:              envVars,
 				Ports:            []TargonPort{{ContainerPort: port, Protocol: "TCP"}},
 				SharedMemorySize: sharedMemorySize, // Pass it to Targon
-				ReadinessProbe:   readinessProbe,
-				LivenessProbe:    livenessProbe,
 			},
 			MinReplicas:          &minReplicas,
 			MaxReplicas:          maxReplicas,
@@ -588,7 +469,7 @@ func buildTargonRequest(req CreateModelRequest) (TargonCreateRequest, error) {
 	}, nil
 }
 
-func (t *TargonManager) pollAndEnableModel(ctx context.Context, targonUID string, modelNames []string, modelID uint64,
+func (t *TargonHandler) pollAndEnableModel(ctx context.Context, targonUID string, modelNames []string, modelID uint64,
 	icpt, ocpt, crc uint64, modality string, allowedUserID uint64) {
 	ticker := time.NewTicker(shared.TargonPollingInterval)
 	defer ticker.Stop()
