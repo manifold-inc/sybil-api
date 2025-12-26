@@ -40,6 +40,7 @@ type InferenceBody struct {
 }
 
 type ChatSettings struct {
+	Model             string   `json:"model"`
 	MaxTokens         int      `json:"max_tokens"`
 	Temperature       float32  `json:"temperature"`
 	TopP              float32  `json:"top_p"`
