@@ -38,7 +38,7 @@ type NewHistoryOutput struct {
 type UpdateHistoryInput struct {
 	HistoryID string
 	Messages  []shared.ChatMessage
-	Settings  map[string]any
+	Settings  *shared.ChatSettings
 	UserID    uint64
 	Ctx       context.Context
 	LogFields map[string]string

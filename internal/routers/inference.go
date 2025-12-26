@@ -234,7 +234,7 @@ func (ir *InferenceRouter) CompletionRequestNewHistory(cc echo.Context) error {
 
 type UpdateHistoryRequest struct {
 	Messages []shared.ChatMessage `json:"messages,omitempty"`
-	Settings map[string]any       `json:"settings,omitempty"`
+	Settings shared.ChatSettings  `json:"settings,omitempty"`
 }
 
 // UpdateHistory is the HTTP handler wrapper for the history update logic
@@ -259,7 +259,7 @@ func (ir *InferenceRouter) UpdateHistory(cc echo.Context) error {
 	output, err := ir.ih.UpdateHistoryLogic(&inferenceRoute.UpdateHistoryInput{
 		HistoryID: historyID,
 		Messages:  req.Messages,
-		Settings:  req.Settings,
+		Settings:  &req.Settings,
 		UserID:    c.User.UserID,
 		Ctx:       c.Request().Context(),
 		LogFields: logfields,

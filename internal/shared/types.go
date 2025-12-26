@@ -39,6 +39,20 @@ type InferenceBody struct {
 	Logprobs    bool          `json:"logprobs"`
 }
 
+type ChatSettings struct {
+	MaxTokens         int      `json:"max_tokens"`
+	Temperature       float32  `json:"temperature"`
+	TopP              float32  `json:"top_p"`
+	TopK              float32  `json:"top_k"`
+	FrequencyPenalty  float32  `json:"frequency_penalty"`
+	PresencePenalty   float32  `json:"presence_penalty"`
+	RepetitionPenalty float32  `json:"repetition_penalty"`
+	Stop              []string `json:"stop"`
+	Seed              int      `json:"seed"`
+	Stream            bool     `json:"stream"`
+	Logprobs          bool     `json:"logprobs"`
+}
+
 type SearchResults struct {
 	URL           *string   `json:"url,omitempty"`
 	Source        *string   `json:"source,omitempty"`
