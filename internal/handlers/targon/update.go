@@ -2,14 +2,16 @@ package targon
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"strings"
-	"sybil-api/internal/shared"
 	"time"
+
+	"sybil-api/internal/shared"
 )
 
 type UpdateModelRequest struct {
@@ -56,11 +58,23 @@ type TargonPredictorConfigUpdate struct {
 	TimeoutSeconds       *int64                          `json:"timeoutSeconds,omitempty"`
 }
 
-func (t *TargonHandler) UpdateModelLogic(input UpdateModelInput) UpdateModelOutput {
+// UpdateModelInput contains all data needed for UpdateModel business logic
+type UpdateModelInput struct {
+	Ctx    context.Context
+	UserID uint64
+	Req    UpdateModelRequest
+}
 
+type UpdateModelOutput struct {
+	ModelID   uint64
+	TargonUID string
+	Name      *string
+	Message   string
+}
+
+func (t *TargonHandler) UpdateModelLogic(input UpdateModelInput) (*UpdateModelOutput, error) {
 	if err := validateUpdateModelRequest(input.Req); err != nil {
-		t.Log.Errorw("Failed to validate request", "error", err.Error())
-		return UpdateModelOutput{Error: err, StatusCode: http.StatusBadRequest}
+		return nil, errors.Join(errors.New("failed to validate request"), err, shared.ErrBadRequest)
 	}
 
 	// Verify the model exists and get current config
@@ -70,68 +84,53 @@ func (t *TargonHandler) UpdateModelLogic(input UpdateModelInput) UpdateModelOutp
 	checkQuery := `SELECT id, targon_uid, config FROM model WHERE targon_uid = ?`
 	err := t.WDB.QueryRowContext(input.Ctx, checkQuery, input.Req.TargonUID).Scan(&modelID, &currentTargonUID, &currentConfigJSON)
 	if err != nil {
-		t.Log.Errorw("Model not found or access denied", "error", err.Error(), "targon_uid", input.Req.TargonUID)
-		return UpdateModelOutput{Error: errors.New("model not found"), StatusCode: http.StatusNotFound}
+		return nil, shared.ErrNotFound
 	}
 
 	// Parse current config
 	var currentConfig TargonCreateRequest
 	if err := json.Unmarshal([]byte(currentConfigJSON), &currentConfig); err != nil {
-		t.Log.Errorw("Failed to parse current config", "error", err.Error())
-		return UpdateModelOutput{Error: shared.ErrInternalServerError.Err, StatusCode: http.StatusInternalServerError}
+		return nil, errors.Join(errors.New("failed to parse current config"), err, shared.ErrInternalServerError)
 	}
-
-	t.Log.Infow("Updating model",
-		"targon_uid", input.Req.TargonUID,
-		"model_id", modelID,
-		"user_id", input.UserID)
 
 	// Build the Targon update request
 	targonReq := buildTargonUpdateRequest(input.Req)
 	targonReqJSON, err := json.Marshal(targonReq)
 	if err != nil {
-		t.Log.Errorw("Failed to marshal targon request", "error", err.Error())
-		return UpdateModelOutput{Error: shared.ErrInternalServerError.Err, StatusCode: http.StatusInternalServerError}
+		return nil, errors.Join(errors.New("failed to marshal targon request"), err, shared.ErrInternalServerError)
 	}
-
-	t.Log.Infow("Sending update request to Targon", "request", string(targonReqJSON))
 
 	// Send update request to Targon
 	url := fmt.Sprintf("%s/v1/inference", t.TargonEndpoint)
 	httpReq, err := http.NewRequest("PATCH", url, bytes.NewBuffer(targonReqJSON))
 	if err != nil {
-		t.Log.Errorw("Failed to create http request", "error", err.Error())
-		return UpdateModelOutput{Error: shared.ErrInternalServerError.Err, StatusCode: http.StatusInternalServerError}
+		return nil, errors.Join(errors.New("failed creating http request"), err, shared.ErrInternalServerError)
 	}
 	httpReq.Header.Set("Authorization", fmt.Sprintf("Bearer %s", t.TargonAPIKey))
 	httpReq.Header.Set("Content-Type", "application/json")
 
 	res, err := t.HTTPClient.Do(httpReq)
 	if err != nil {
-		t.Log.Errorw("Failed to do http request", "error", err.Error())
-		return UpdateModelOutput{Error: shared.ErrInternalServerError.Err, StatusCode: http.StatusInternalServerError}
+		return nil, errors.Join(errors.New("failed to do http request"), err, shared.ErrInternalServerError)
 	}
 	defer func() {
 		if closeErr := res.Body.Close(); closeErr != nil {
-			t.Log.Warnw("Failed to close response body", "error", closeErr)
+			t.Log.Warnw("failed to close response body", "error", closeErr)
 		}
 	}()
 
 	resBody, err := io.ReadAll(res.Body)
 	if err != nil {
-		t.Log.Errorw("Failed to read response body", "error", err.Error())
-		return UpdateModelOutput{Error: shared.ErrInternalServerError.Err, StatusCode: http.StatusInternalServerError}
+		return nil, errors.Join(errors.New("failed to read response body"), err, shared.ErrInternalServerError)
 	}
 
 	if res.StatusCode != http.StatusOK {
-		t.Log.Errorw("Targon returned error", "status", res.StatusCode, "body", string(resBody))
-		return UpdateModelOutput{Error: errors.New("targon service update failed"), StatusCode: http.StatusInternalServerError}
+		return nil, errors.Join(fmt.Errorf("targon returned error: [%d: %s]", res.StatusCode, string(resBody)), err, shared.ErrInternalServerError)
 	}
 
 	var targonResp map[string]any
 	if err := json.Unmarshal(resBody, &targonResp); err != nil {
-		t.Log.Errorw("Failed to parse Targon response", "error", err.Error())
-		return UpdateModelOutput{Error: shared.ErrInternalServerError.Err, StatusCode: http.StatusInternalServerError}
+		return nil, errors.Join(errors.New("failed to parse targon response"), err, shared.ErrInternalServerError)
 	}
 
 	t.Log.Infow("Targon service updated successfully",
@@ -142,8 +141,7 @@ func (t *TargonHandler) UpdateModelLogic(input UpdateModelInput) UpdateModelOutp
 	mergedConfig := mergeConfigs(currentConfig, input.Req)
 	mergedConfigJSON, err := json.Marshal(mergedConfig)
 	if err != nil {
-		t.Log.Errorw("Failed to marshal merged config", "error", err.Error())
-		return UpdateModelOutput{Error: shared.ErrInternalServerError.Err, StatusCode: http.StatusInternalServerError}
+		return nil, errors.Join(errors.New("failed to marshal merged config"), err, shared.ErrInternalServerError)
 	}
 
 	// Update database record
@@ -169,21 +167,8 @@ func (t *TargonHandler) UpdateModelLogic(input UpdateModelInput) UpdateModelOutp
 
 	_, err = t.WDB.ExecContext(input.Ctx, updateQuery, args...)
 	if err != nil {
-		t.Log.Errorw("Failed to update model database record",
-			"error", err.Error(),
-			"targon_uid", input.Req.TargonUID,
-			"model_id", modelID)
-		return UpdateModelOutput{
-			Message:    "Model updated in Targon but failed to update database record. Please contact support.",
-			TargonUID:  input.Req.TargonUID,
-			StatusCode: http.StatusOK,
-		}
+		return nil, errors.Join(fmt.Errorf("failed to update model database record: [%s:%d]", input.Req.TargonUID, modelID), err, shared.ErrPartialSuccess)
 	}
-
-	t.Log.Infow("Successfully updated model",
-		"targon_uid", input.Req.TargonUID,
-		"model_id", modelID,
-		"user_id", input.UserID)
 
 	response := map[string]any{
 		"message":    "Successfully updated model",
@@ -195,13 +180,12 @@ func (t *TargonHandler) UpdateModelLogic(input UpdateModelInput) UpdateModelOutp
 		response["name"] = *input.Req.Name
 	}
 
-	return UpdateModelOutput{
-		ModelID:    modelID,
-		TargonUID:  input.Req.TargonUID,
-		Name:       input.Req.Name,
-		Message:    "Successfully updated model",
-		StatusCode: 200,
-	}
+	return &UpdateModelOutput{
+		ModelID:   modelID,
+		TargonUID: input.Req.TargonUID,
+		Name:      input.Req.Name,
+		Message:   "Successfully updated model",
+	}, nil
 }
 
 func validateUpdateModelRequest(req UpdateModelRequest) error {

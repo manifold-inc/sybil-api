@@ -41,7 +41,6 @@ func (tr *TargonRouter) CreateModel(cc echo.Context) error {
 		UserID: c.User.UserID,
 		Req:    req,
 	})
-
 	// Handle errors
 	if err != nil {
 		c.LogValues.AddError(err)
@@ -66,14 +65,20 @@ func (tr *TargonRouter) CreateModel(cc echo.Context) error {
 func (tr *TargonRouter) DeleteModel(cc echo.Context) error {
 	c := cc.(*ctx.Context)
 
-	output := tr.th.DeleteModelLogic(targon.DeleteModelInput{
+	output, err := tr.th.DeleteModelLogic(targon.DeleteModelInput{
 		Ctx:      c.Request().Context(),
 		UserID:   c.User.UserID,
 		ModelUID: c.Param("uid"),
 	})
-
-	if output.Error != nil {
-		return c.JSON(output.StatusCode, map[string]string{"error": output.Error.Error()})
+	// Handle errors
+	if err != nil {
+		c.LogValues.AddError(err)
+		switch true {
+		case errors.Is(err, shared.ErrNotFound):
+			return c.JSON(shared.ErrNotFound.StatusCode, map[string]string{"error": "model not found"})
+		default:
+			return c.JSON(shared.ErrInternalServerError.StatusCode, map[string]string{"error": shared.ErrInternalServerError.Error()})
+		}
 	}
 
 	return c.JSON(http.StatusOK, map[string]any{
@@ -97,14 +102,24 @@ func (tr *TargonRouter) UpdateModel(cc echo.Context) error {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid JSON format"})
 	}
 
-	output := tr.th.UpdateModelLogic(targon.UpdateModelInput{
+	output, err := tr.th.UpdateModelLogic(targon.UpdateModelInput{
 		Ctx:    c.Request().Context(),
 		UserID: c.User.UserID,
 		Req:    req,
 	})
-
-	if output.Error != nil {
-		return c.JSON(output.StatusCode, map[string]string{"error": output.Error.Error()})
+	// Handle errors
+	if err != nil {
+		c.LogValues.AddError(err)
+		switch true {
+		case errors.Is(err, shared.ErrNotFound):
+			return c.JSON(shared.ErrNotFound.StatusCode, map[string]string{"error": "model not found"})
+		case errors.Is(err, shared.ErrBadRequest):
+			return c.JSON(shared.ErrBadRequest.StatusCode, map[string]string{"error": shared.ErrBadRequest.Error()})
+		case errors.Is(err, shared.ErrPartialSuccess):
+			return c.JSON(shared.ErrPartialSuccess.StatusCode, map[string]string{"error": "partial success; resource may be in unknown state"})
+		default:
+			return c.JSON(shared.ErrInternalServerError.StatusCode, map[string]string{"error": shared.ErrInternalServerError.Error()})
+		}
 	}
 
 	response := map[string]any{

@@ -17,4 +17,6 @@ var (
 
 	ErrInternalServerError = &RequestError{Err: errors.New("internal server error"), StatusCode: 500}
 	ErrBadRequest          = &RequestError{Err: errors.New("bad request"), StatusCode: 400}
+	ErrNotFound            = &RequestError{Err: errors.New("not found"), StatusCode: 404}
+	ErrPartialSuccess      = &RequestError{Err: errors.New("partial success"), StatusCode: 200}
 )
