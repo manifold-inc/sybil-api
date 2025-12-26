@@ -127,8 +127,11 @@ func (im *InferenceHandler) CompletionRequestNewHistoryLogic(input *NewHistoryIn
 		}, nil
 	}
 
-	// Default chat settings {}
-	settings := map[string]any{}
+	// overlap in types with InferenceBody and ChatSettings, should clean up once InferenceBody is better defined
+	var settings shared.ChatSettings
+	if err := json.Unmarshal(input.Body, &settings); err != nil {
+		log.Warnw("Failed to parse request body for settings", "error", err.Error())
+	}
 	settingsJSON, err := json.Marshal(settings)
 	if err != nil {
 		log.Errorw("Failed to marshal initial settings", "error", err)
