@@ -28,8 +28,16 @@ func NewTrackMiddleware(log *zap.SugaredLogger) echo.MiddlewareFunc {
 			cc := &ctx.Context{Context: c, Log: logger, Reqid: reqID, LogValues: &ctx.ContextLogValues{RequestID: reqID, ExternalID: externalID, StartTime: start, Path: c.Path()}}
 			err := next(cc)
 			cc.LogValues.RequestDuration = time.Since(start)
-			cc.LogValues.StatusCode = cc.Response().Status
-			cc.Log.Infow("end_of_request", zap.Object("log_values", cc.LogValues))
+			status := cc.Response().Status
+			cc.LogValues.StatusCode = status
+			switch true {
+			case status < 300:
+				cc.Log.Infow("end_of_request", zap.Object("log_values", cc.LogValues))
+			case status < 500:
+				cc.Log.Warnw("end_of_request", zap.Object("log_values", cc.LogValues))
+			default:
+				cc.Log.Errorw("end_of_request", zap.Object("log_values", cc.LogValues))
+			}
 			metrics.ResponseCodes.WithLabelValues(cc.Path(), fmt.Sprintf("%d", cc.Response().Status)).Inc()
 			return err
 		}
