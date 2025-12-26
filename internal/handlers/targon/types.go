@@ -2,23 +2,6 @@ package targon
 
 import "context"
 
-// CreateModelInput contains all data needed for CreateModel business logic
-type CreateModelInput struct {
-	Ctx    context.Context
-	UserID uint64
-	Req    CreateModelRequest
-}
-
-type CreateModelOutput struct {
-	ModelID    int64
-	TargonUID  string
-	Name       string
-	Status     string
-	Message    string
-	Error      error
-	StatusCode int
-}
-
 // DeleteModelInput contains all data needed for DeleteModel business logic
 type DeleteModelInput struct {
 	Ctx      context.Context

@@ -2,6 +2,7 @@ package routers
 
 import (
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 
@@ -35,15 +36,21 @@ func (tr *TargonRouter) CreateModel(cc echo.Context) error {
 	}
 
 	// Call business logic with structured input
-	output := tr.th.CreateModelLogic(targon.CreateModelInput{
+	output, err := tr.th.CreateModelLogic(targon.CreateModelInput{
 		Ctx:    c.Request().Context(),
 		UserID: c.User.UserID,
 		Req:    req,
 	})
 
 	// Handle errors
-	if output.Error != nil {
-		return c.JSON(output.StatusCode, map[string]string{"error": output.Error.Error()})
+	if err != nil {
+		c.LogValues.AddError(err)
+		switch true {
+		case errors.Is(err, shared.ErrBadRequest):
+			return c.JSON(shared.ErrBadRequest.StatusCode, map[string]string{"error": shared.ErrBadRequest.Error()})
+		default:
+			return c.JSON(shared.ErrInternalServerError.StatusCode, map[string]string{"error": shared.ErrInternalServerError.Error()})
+		}
 	}
 
 	// Return success response

@@ -2,6 +2,7 @@
 package ctx
 
 import (
+	"fmt"
 	"time"
 
 	"sybil-api/internal/shared"
@@ -14,21 +15,34 @@ import (
 // ContextLogValues should only be accessed for logging, and not for
 // actual business logic, or any other logic
 type ContextLogValues struct {
-	UserID         uint64 `json:"user_id,omitempty"`
-	Credits        uint64 `json:"credits,omitempty"`
-	PlanRequests   uint   `json:"plan_requests,omitempty"`
-	AllowOverspend bool   `json:"allow_overspend,omitempty"`
-	StoreData      bool   `json:"store_data,omitempty"`
-	Role           string `json:"role,omitempty"`
-
-	RequestID  string
-	ExternalID string
-	StartTime  time.Time
-
+	// Added in base middleware
+	RequestID       string
+	ExternalID      string
+	StartTime       time.Time
 	StatusCode      int
 	RequestDuration time.Duration
-	Error           error
 	Path            string
+
+	// Added in user middleware
+	UserID         uint64
+	Credits        uint64
+	PlanRequests   uint
+	AllowOverspend bool
+	StoreData      bool
+	Role           string
+
+	// Added dynamically
+	Error error
+}
+
+// AddError adds errors to the error chain. Always add errors, even if only warnings.
+// Log level is determined by the status code of the reuqest
+func (c *ContextLogValues) AddError(err error) {
+	if c.Error == nil {
+		c.Error = err
+		return
+	}
+	c.Error = fmt.Errorf("%w: %w", err, c.Error)
 }
 
 func (c *ContextLogValues) MarshalLogObject(enc zapcore.ObjectEncoder) error {

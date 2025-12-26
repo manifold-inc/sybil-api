@@ -16,4 +16,5 @@ var (
 	ErrKeyRequired = &RequestError{Err: errors.New("key is required"), StatusCode: 400}
 
 	ErrInternalServerError = &RequestError{Err: errors.New("internal server error"), StatusCode: 500}
+	ErrBadRequest          = &RequestError{Err: errors.New("bad request"), StatusCode: 400}
 )
