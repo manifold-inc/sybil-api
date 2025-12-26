@@ -30,7 +30,18 @@ func NewTrackMiddleware(log *zap.SugaredLogger) echo.MiddlewareFunc {
 			cc.LogValues.RequestDuration = time.Since(start)
 			status := cc.Response().Status
 			cc.LogValues.StatusCode = status
+
+			// Switch cases are top down, so we make sure to check any overrides
+			// for log levels (usually from streaming requests) before the presented
+			// status code
 			switch true {
+			case cc.LogValues.LogLevel == "ERROR":
+				cc.Log.Errorw("end_of_request", zap.Object("log_values", cc.LogValues))
+			case cc.LogValues.LogLevel == "WARN":
+				cc.Log.Warnw("end_of_request", zap.Object("log_values", cc.LogValues))
+			case cc.LogValues.LogLevel == "INFO":
+				cc.Log.Infow("end_of_request", zap.Object("log_values", cc.LogValues))
+
 			case status < 300:
 				cc.Log.Infow("end_of_request", zap.Object("log_values", cc.LogValues))
 			case status < 500:

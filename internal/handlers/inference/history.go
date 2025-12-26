@@ -8,31 +8,13 @@ import (
 	"fmt"
 	"maps"
 	"strings"
-	"sybil-api/internal/shared"
 	"time"
+
+	"sybil-api/internal/shared"
 
 	"github.com/aidarkhanov/nanoid"
 	"go.uber.org/zap"
 )
-
-// NewHistoryInput contains all inputs needed to create a new chat history entry with inference
-type NewHistoryInput struct {
-	Body         []byte
-	User         shared.UserMetadata
-	RequestID    string
-	Ctx          context.Context
-	LogFields    map[string]string
-	StreamWriter func(token string) error // Optional callback for real-time streaming
-}
-
-// NewHistoryOutput contains the results of creating a new history entry and running inference
-type NewHistoryOutput struct {
-	HistoryID     string
-	HistoryIDJSON string // SSE event for history ID
-	Stream        bool
-	FinalResponse []byte
-	Error         *HistoryError
-}
 
 // UpdateHistoryInput contains all inputs needed to update an existing chat history
 type UpdateHistoryInput struct {
@@ -58,46 +40,50 @@ type HistoryError struct {
 	Err        error
 }
 
+// NewHistoryInput contains all inputs needed to create a new chat history entry with inference
+type NewHistoryInput struct {
+	Body         []byte
+	User         shared.UserMetadata
+	RequestID    string
+	Ctx          context.Context
+	LogFields    map[string]string
+	StreamWriter func(token string) error // Optional callback for real-time streaming
+}
+
+// NewHistoryOutput contains the results of creating a new history entry and running inference
+type NewHistoryOutput struct {
+	HistoryID     string
+	HistoryIDJSON string // SSE event for history ID
+	Stream        bool
+	FinalResponse []byte
+}
+
+// CompletionRequestNewHistoryLogic initializes a new chat with history for the
+// front end TODO @sean should we create history *after* a request finishes to
+// ensure consistency? in the case a inference request fails at some point
+// before it finishes, we cant save it in the db anyways, and the ux will be
+// subpar. The FE can already handle streaming in text before routing to a
+// history id, so it may make more sense to just completely delay saving
+// to the history table till its all done. This way we could create the
+// history entry with all its data instead of a create + update from a new request.
 func (im *InferenceHandler) CompletionRequestNewHistoryLogic(input *NewHistoryInput) (*NewHistoryOutput, error) {
 	log := logWithFields(im.Log, input.LogFields)
 
 	// Parse request body
 	var payload shared.InferenceBody
 	if err := json.Unmarshal(input.Body, &payload); err != nil {
-		log.Errorw("Failed to parse request body", "error", err.Error())
-		return &NewHistoryOutput{
-			Error: &HistoryError{
-				StatusCode: 400,
-				Message:    "invalid JSON format",
-				Err:        err,
-			},
-		}, nil
+		return nil, errors.Join(&shared.RequestError{Err: errors.New("failed to parse request body"), StatusCode: 400}, err)
 	}
 
 	if len(payload.Messages) == 0 {
-		return &NewHistoryOutput{
-			Error: &HistoryError{
-				StatusCode: 400,
-				Message:    "messages are required",
-				Err:        errors.New("messages are required"),
-			},
-		}, nil
+		return nil, errors.Join(&shared.RequestError{Err: errors.New("messages cannot be empty"), StatusCode: 400})
 	}
 
 	messages := payload.Messages
 
 	// Generate history ID
-	historyIDNano, err := nanoid.Generate("0123456789abcdefghijklmnopqrstuvwxyz", 11)
-	if err != nil {
-		log.Errorw("Failed to generate history nanoid", "error", err)
-		return &NewHistoryOutput{
-			Error: &HistoryError{
-				StatusCode: 500,
-				Message:    "failed to generate history ID",
-				Err:        err,
-			},
-		}, nil
-	}
+	// No use checking this; i dont think its even possible for this to fail here
+	historyIDNano, _ := nanoid.Generate("0123456789abcdefghijklmnopqrstuvwxyz", 11)
 	historyID := "chat-" + historyIDNano
 
 	// Extract title from first user message
@@ -116,14 +102,7 @@ func (im *InferenceHandler) CompletionRequestNewHistoryLogic(input *NewHistoryIn
 	// Marshal messages for DB insert
 	messagesJSON, err := json.Marshal(messages)
 	if err != nil {
-		log.Errorw("Failed to marshal initial messages", "error", err)
-		return &NewHistoryOutput{
-			Error: &HistoryError{
-				StatusCode: 500,
-				Message:    "failed to prepare history",
-				Err:        err,
-			},
-		}, nil
+		return nil, errors.Join(&shared.RequestError{Err: errors.New("failed to prepare history"), StatusCode: 500}, err)
 	}
 
 	// Insert into database
@@ -145,17 +124,8 @@ func (im *InferenceHandler) CompletionRequestNewHistoryLogic(input *NewHistoryIn
 		nil, // icon
 	)
 	if err != nil {
-		log.Errorw("Failed to insert history into database", "error", err)
-		return &NewHistoryOutput{
-			Error: &HistoryError{
-				StatusCode: 500,
-				Message:    "failed to create history",
-				Err:        err,
-			},
-		}, nil
+		return nil, errors.Join(shared.ErrInternalServerError, errors.New("failed to insert history into db"), err)
 	}
-
-	log.Infow("Chat history created", "history_id", historyID, "user_id", input.User.UserID)
 
 	// Prepare history ID SSE event
 	historyIDEvent := map[string]any{
@@ -181,16 +151,9 @@ func (im *InferenceHandler) CompletionRequestNewHistoryLogic(input *NewHistoryIn
 	})
 
 	if preErr != nil {
-		log.Warnw("Preprocessing failed", "error", preErr.Err)
-		return &NewHistoryOutput{
-			HistoryID:     historyID,
-			HistoryIDJSON: string(historyIDJSON),
-			Error: &HistoryError{
-				StatusCode: preErr.StatusCode,
-				Message:    "inference error",
-				Err:        preErr.Err,
-			},
-		}, nil
+		// TODO delete this chat from db since it failed to initalize
+		// We can safely bubble up pre error since its already a request error
+		return nil, errors.Join(preErr, errors.New("failed preprocessing"))
 	}
 
 	// Run inference with streaming callback
@@ -203,19 +166,9 @@ func (im *InferenceHandler) CompletionRequestNewHistoryLogic(input *NewHistoryIn
 	})
 
 	if reqErr != nil {
-		if reqErr.StatusCode >= 500 && reqErr.Err != nil {
-			log.Warnw("Inference error", "error", reqErr.Err.Error())
-		}
-		return &NewHistoryOutput{
-			HistoryID:     historyID,
-			HistoryIDJSON: string(historyIDJSON),
-			Error: &HistoryError{
-				StatusCode: reqErr.StatusCode,
-				Message:    "inference error",
-				Err:        reqErr.Err,
-			},
-		}, nil
-		}
+		// TODO delete this chat from db since it failed to initalize
+		return nil, errors.Join(reqErr, errors.New("inference error"))
+	}
 
 	if out == nil {
 		return &NewHistoryOutput{
@@ -232,19 +185,29 @@ func (im *InferenceHandler) CompletionRequestNewHistoryLogic(input *NewHistoryIn
 		assistantContent = extractContentFromFinalResponse(out.FinalResponse)
 	}
 
+	if assistantContent == "" {
+		return &NewHistoryOutput{
+			HistoryID:     historyID,
+			HistoryIDJSON: string(historyIDJSON),
+			Stream:        out.Stream,
+			FinalResponse: out.FinalResponse,
+		}, nil
+	}
+
 	// Update history with assistant response asynchronously
-	if assistantContent != "" {
 	var allMessages []shared.ChatMessage
 	allMessages = append(allMessages, messages...)
-		allMessages = append(allMessages, shared.ChatMessage{
-			Role:    "assistant",
-			Content: assistantContent,
-		})
+	allMessages = append(allMessages, shared.ChatMessage{
+		Role:    "assistant",
+		Content: assistantContent,
+	})
 
 	allMessagesJSON, err := json.Marshal(allMessages)
 	if err != nil {
-			log.Errorw("Failed to marshal complete messages", "error", err)
-		} else {
+		log.Errorw("Failed to marshal complete messages", "error", err)
+		return nil, errors.Join(shared.ErrInternalServerError, errors.New("failed to marshal complete message"), err)
+	}
+
 	go func(userID uint64, historyID string, messagesJSON []byte, log *zap.SugaredLogger) {
 		updateQuery := `
 			UPDATE chat_history 
@@ -258,14 +221,10 @@ func (im *InferenceHandler) CompletionRequestNewHistoryLogic(input *NewHistoryIn
 			return
 		}
 
-		log.Infow("Chat history updated with assistant response", "history_id", historyID, "user_id", userID)
-
 		if err := im.updateUserStreak(userID, log); err != nil {
 			log.Errorw("Failed to update user streak", "error", err, "user_id", userID)
 		}
-			}(input.User.UserID, historyID, allMessagesJSON, log)
-		}
-	}
+	}(input.User.UserID, historyID, allMessagesJSON, log)
 
 	return &NewHistoryOutput{
 		HistoryID:     historyID,

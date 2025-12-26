@@ -206,12 +206,8 @@ func (ir *InferenceRouter) CompletionRequestNewHistory(cc echo.Context) error {
 		StreamWriter: streamCallback, // Pass callback for real-time streaming
 	})
 	if err != nil {
-		c.Log.Errorw("History creation failed", "error", err)
-		return nil
-	}
-
-	if output.Error != nil {
-		c.Log.Errorw("History logic error", "error", output.Error.Message)
+		c.LogValues.AddError(err)
+		c.LogValues.LogLevel = "ERROR"
 		return nil
 	}
 

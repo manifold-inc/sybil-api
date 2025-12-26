@@ -31,6 +31,11 @@ type ContextLogValues struct {
 	StoreData      bool
 	Role           string
 
+	// Override log Log Level
+	// useful for streaming where status code might be sent before errors from
+	// mid-stream or post processing occur
+	LogLevel string
+
 	// Added dynamically
 	Error error
 }
