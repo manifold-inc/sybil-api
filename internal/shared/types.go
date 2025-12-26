@@ -1,7 +1,6 @@
 package shared
 
 import (
-	"fmt"
 	"time"
 )
 
@@ -71,15 +70,6 @@ type ErrorReport struct {
 	Endpoint  string `json:"endpoint"`
 	Error     string `json:"error"`
 	Traceback string `json:"traceback,omitempty"`
-}
-
-type RequestError struct {
-	StatusCode int
-	Err        error
-}
-
-func (r *RequestError) Error() string {
-	return fmt.Sprintf("status %d: err %v", r.StatusCode, r.Err)
 }
 
 type UserMetadata struct {
