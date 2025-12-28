@@ -5,7 +5,6 @@ go 1.25.1
 require (
 	github.com/aidarkhanov/nanoid v1.0.8
 	github.com/go-sql-driver/mysql v1.8.0
-	github.com/google/uuid v1.6.0
 	github.com/labstack/echo/v4 v4.11.4
 	github.com/manifold-inc/manifold-sdk v0.0.2
 	github.com/prometheus/client_golang v1.23.2
@@ -28,6 +27,7 @@ require (
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/golang-jwt/jwt v3.2.2+incompatible // indirect
 	github.com/google/s2a-go v0.1.9 // indirect
+	github.com/google/uuid v1.6.0 // indirect
 	github.com/googleapis/enterprise-certificate-proxy v0.3.6 // indirect
 	github.com/googleapis/gax-go/v2 v2.14.1 // indirect
 	github.com/labstack/gommon v0.4.2 // indirect
