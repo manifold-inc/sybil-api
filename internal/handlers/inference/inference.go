@@ -21,21 +21,29 @@ type InferenceInput struct {
 	StreamWriter func(token string) error // callback for real-time streaming
 }
 
-type InferenceOutput struct {
+type InferenceMetadata struct {
 	Stream           bool
-	FinalResponse    []byte
-	ModelID          string
-	TimeToFirstToken time.Duration
-	TotalTime        time.Duration
 	Usage            *shared.Usage
 	Completed        bool
 	Canceled         bool
+	ModelID          string
+	TimeToFirstToken time.Duration
+	TotalTime        time.Duration
 }
 
-func (im *InferenceHandler) DoInference(input InferenceInput) (*InferenceOutput, *shared.RequestError) {
+type InferenceOutput struct {
+	FinalResponse []byte
+	Metadata      *InferenceMetadata
+}
+
+// DoInference only returns errors from bad inputs and when output would not exist.
+// A partial stream for instance would not return an error directly but be baked inside of
+// InferenceOutput. The difference is that if we get an error back from DoInference,
+// we can assume no http status code was sent and the router should send them accordingly
+func (im *InferenceHandler) DoInference(input InferenceInput) (*InferenceOutput, error) {
 	if input.Req == nil {
 		return nil, &shared.RequestError{
-			StatusCode: 500,
+			StatusCode: 400,
 			Err:        errors.New("request info missing"),
 		}
 	}
@@ -68,7 +76,7 @@ func (im *InferenceHandler) DoInference(input InferenceInput) (*InferenceOutput,
 		return nil, qerr
 	}
 
-	output := &InferenceOutput{
+	meta := &InferenceMetadata{
 		Stream:           reqInfo.Stream,
 		ModelID:          fmt.Sprintf("%d", resInfo.ModelID),
 		TimeToFirstToken: resInfo.TimeToFirstToken,
@@ -76,26 +84,11 @@ func (im *InferenceHandler) DoInference(input InferenceInput) (*InferenceOutput,
 		Usage:            resInfo.Usage,
 		Completed:        resInfo.Completed,
 		Canceled:         resInfo.Canceled,
-		FinalResponse:    []byte(resInfo.ResponseContent),
 	}
-
-	log := im.Log.With(
-		"endpoint", reqInfo.Endpoint,
-		"user_id", input.User.UserID,
-		"request_id", reqInfo.ID,
-	)
+	output := &InferenceOutput{Metadata: meta, FinalResponse: []byte(resInfo.ResponseContent)}
 
 	if resInfo.ResponseContent == "" || !resInfo.Completed {
-		log.Errorw("No response or incomplete response from model",
-			"response_content_length", len(resInfo.ResponseContent),
-			"completed", resInfo.Completed,
-			"canceled", resInfo.Canceled,
-			"ttft", resInfo.TimeToFirstToken,
-			"total_time", resInfo.TotalTime)
-		return nil, &shared.RequestError{
-			StatusCode: 500,
-			Err:        errors.New("no response from model"),
-		}
+		return output, nil
 	}
 
 	go func() {
@@ -106,7 +99,7 @@ func (im *InferenceHandler) DoInference(input InferenceInput) (*InferenceOutput,
 			var chunks []map[string]any
 			err := json.Unmarshal([]byte(resInfo.ResponseContent), &chunks)
 			if err != nil {
-				log.Errorw(
+				im.Log.Warnw(
 					"Failed to unmarshal streaming ResponseContent as JSON array of chunks",
 					"error",
 					err,
@@ -122,7 +115,7 @@ func (im *InferenceHandler) DoInference(input InferenceInput) (*InferenceOutput,
 						resInfo.Usage = extractedUsage
 						break
 					}
-					log.Warnw(
+					im.Log.Warnw(
 						"Failed to extract usage data from a response chunk that had a non-null usage field",
 						"chunk_index",
 						i,
@@ -134,7 +127,7 @@ func (im *InferenceHandler) DoInference(input InferenceInput) (*InferenceOutput,
 			var singleResponse map[string]any
 			err := json.Unmarshal([]byte(resInfo.ResponseContent), &singleResponse)
 			if err != nil {
-				log.Errorw(
+				im.Log.Warnw(
 					"Failed to unmarshal non-streaming ResponseContent as single JSON object",
 					"error",
 					err,
@@ -149,7 +142,7 @@ func (im *InferenceHandler) DoInference(input InferenceInput) (*InferenceOutput,
 					resInfo.Usage = extractedUsage
 					break
 				}
-				log.Warnw(
+				im.Log.Warnw(
 					"Failed to extract usage data from single response object that had a non-null usage field",
 				)
 			}

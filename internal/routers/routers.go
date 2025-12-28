@@ -2,21 +2,11 @@ package routers
 
 import (
 	"fmt"
-	"io"
 	"maps"
 	"net/http"
 
 	"sybil-api/internal/ctx"
 )
-
-func readRequestBody(c *ctx.Context) ([]byte, error) {
-	body, err := io.ReadAll(c.Request().Body)
-	if err != nil {
-		c.Log.Errorw("Failed to read request body", "error", err.Error())
-		return nil, err
-	}
-	return body, nil
-}
 
 func buildLogFields(c *ctx.Context, endpoint string, extras map[string]string) map[string]string {
 	fields := map[string]string{

@@ -30,14 +30,6 @@ type UpdateHistoryOutput struct {
 	HistoryID string
 	UserID    uint64
 	Message   string
-	Error     *HistoryError
-}
-
-// HistoryError represents a structured error for history operations
-type HistoryError struct {
-	StatusCode int
-	Message    string
-	Err        error
 }
 
 // NewHistoryInput contains all inputs needed to create a new chat history entry with inference
@@ -59,7 +51,8 @@ type NewHistoryOutput struct {
 }
 
 // CompletionRequestNewHistoryLogic initializes a new chat with history for the
-// front end TODO @sean should we create history *after* a request finishes to
+// front end 
+// TODO @sean should we create history *after* a request finishes to
 // ensure consistency? in the case a inference request fails at some point
 // before it finishes, we cant save it in the db anyways, and the ux will be
 // subpar. The FE can already handle streaming in text before routing to a
@@ -179,7 +172,7 @@ func (im *InferenceHandler) CompletionRequestNewHistoryLogic(input *NewHistoryIn
 
 	// Extract assistant message content from inference output
 	var assistantContent string
-	if out.Stream {
+	if out.Metadata.Stream {
 		assistantContent = extractContentFromInferenceOutput(out)
 	} else {
 		assistantContent = extractContentFromFinalResponse(out.FinalResponse)
@@ -189,7 +182,7 @@ func (im *InferenceHandler) CompletionRequestNewHistoryLogic(input *NewHistoryIn
 		return &NewHistoryOutput{
 			HistoryID:     historyID,
 			HistoryIDJSON: string(historyIDJSON),
-			Stream:        out.Stream,
+			Stream:        out.Metadata.Stream,
 			FinalResponse: out.FinalResponse,
 		}, nil
 	}
@@ -229,7 +222,7 @@ func (im *InferenceHandler) CompletionRequestNewHistoryLogic(input *NewHistoryIn
 	return &NewHistoryOutput{
 		HistoryID:     historyID,
 		HistoryIDJSON: string(historyIDJSON),
-		Stream:        out.Stream,
+		Stream:        out.Metadata.Stream,
 		FinalResponse: out.FinalResponse,
 	}, nil
 }
@@ -243,63 +236,25 @@ func (im *InferenceHandler) UpdateHistoryLogic(input *UpdateHistoryInput) (*Upda
 	err := im.RDB.QueryRowContext(input.Ctx, checkQuery, input.HistoryID).Scan(&ownerUserID)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			log.Errorw("History not found", "error", err.Error(), "history_id", input.HistoryID)
-			return &UpdateHistoryOutput{
-				Error: &HistoryError{
-					StatusCode: 404,
-					Message:    "history not found",
-					Err:        err,
-				},
-			}, nil
+			return nil, &shared.RequestError{StatusCode: 404, Err: errors.New("history not found")}
 		}
-		log.Errorw("Failed to check history", "error", err.Error(), "history_id", input.HistoryID)
-		return &UpdateHistoryOutput{
-			Error: &HistoryError{
-				StatusCode: 500,
-				Message:    "internal server error",
-				Err:        err,
-			},
-		}, nil
+		return nil, errors.Join(shared.ErrInternalServerError, err)
 	}
 
 	// Check authorization
 	if ownerUserID != input.UserID {
-		log.Errorw("Unauthorized access to history", "history_id", input.HistoryID, "user_id", input.UserID, "owner_id", ownerUserID)
-		return &UpdateHistoryOutput{
-			Error: &HistoryError{
-				StatusCode: 403,
-				Message:    "unauthorized",
-				Err:        errors.New("unauthorized access"),
-			},
-		}, nil
+		return nil, shared.ErrUnauthorized
 	}
-
-	log.Infow("Updating chat history",
-		"history_id", input.HistoryID,
-		"user_id", input.UserID)
 
 	// Validate messages
 	if len(input.Messages) == 0 {
-		return &UpdateHistoryOutput{
-			Error: &HistoryError{
-				StatusCode: 400,
-				Message:    "messages cannot be empty",
-				Err:        errors.New("messages cannot be empty"),
-			},
-		}, nil
+		return nil, shared.ErrBadRequest
 	}
 
 	// Marshal messages
 	messagesJSON, err := json.Marshal(input.Messages)
 	if err != nil {
-		log.Errorw("Failed to marshal messages", "error", err)
-		return &UpdateHistoryOutput{
-			Error: &HistoryError{
-				StatusCode: 500,
-				Message:    "internal server error",
-				Err:        err,
-			},
-		}, nil
+		return nil, errors.Join(shared.ErrInternalServerError, err)
 	}
 
 	// Update database
@@ -311,26 +266,13 @@ func (im *InferenceHandler) UpdateHistoryLogic(input *UpdateHistoryInput) (*Upda
 
 	_, err = im.WDB.ExecContext(input.Ctx, updateQuery, string(messagesJSON), input.HistoryID)
 	if err != nil {
-		log.Errorw("Failed to update history in database",
-			"error", err.Error(),
-			"history_id", input.HistoryID)
-		return &UpdateHistoryOutput{
-			Error: &HistoryError{
-				StatusCode: 500,
-				Message:    "internal server error",
-				Err:        err,
-			},
-		}, nil
+		return nil, errors.Join(shared.ErrInternalServerError, err)
 	}
-
-	log.Infow("Successfully updated chat history",
-		"history_id", input.HistoryID,
-		"user_id", input.UserID)
 
 	// Update user streak asynchronously
 	go func(userID uint64, log *zap.SugaredLogger) {
 		if err := im.updateUserStreak(userID, log); err != nil {
-			log.Errorw("Failed to update user streak", "error", err, "user_id", userID)
+			im.Log.Errorw("Failed to update user streak", "error", err, "user_id", userID)
 		}
 	}(input.UserID, log)
 

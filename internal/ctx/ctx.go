@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"sybil-api/internal/handlers/inference"
 	"sybil-api/internal/shared"
 
 	"github.com/labstack/echo/v4"
@@ -30,6 +31,12 @@ type ContextLogValues struct {
 	AllowOverspend bool
 	StoreData      bool
 	Role           string
+
+	// Inference metadata fields
+	InfMetadata *inference.InferenceMetadata
+
+	// History related
+	HistoryID string
 
 	// Override log Log Level
 	// useful for streaming where status code might be sent before errors from
@@ -58,6 +65,17 @@ func (c *ContextLogValues) MarshalLogObject(enc zapcore.ObjectEncoder) error {
 		enc.AddBool("allow_overspend", c.AllowOverspend)
 		enc.AddBool("store_data", c.StoreData)
 		enc.AddString("role", c.Role)
+	}
+	if c.InfMetadata != nil {
+		enc.AddDuration("ttft", c.InfMetadata.TimeToFirstToken)
+		enc.AddBool("stream", c.InfMetadata.Stream)
+		enc.AddBool("completed", c.InfMetadata.Completed)
+		enc.AddBool("canceled", c.InfMetadata.Canceled)
+		enc.AddDuration("total_time", c.InfMetadata.TotalTime)
+		enc.AddString("model_id", c.InfMetadata.ModelID)
+		if c.InfMetadata.Usage != nil {
+			enc.AddString("usage", fmt.Sprintf("%v", *c.InfMetadata.Usage))
+		}
 	}
 	enc.AddString("request_id", c.RequestID)
 	enc.AddString("external_id", c.ExternalID)
