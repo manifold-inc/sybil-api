@@ -38,6 +38,7 @@ type NewHistoryOutput struct {
 type UpdateHistoryInput struct {
 	HistoryID string
 	Messages  []shared.ChatMessage
+	Settings  *shared.ChatSettings
 	UserID    uint64
 	Ctx       context.Context
 	LogFields map[string]string
@@ -126,6 +127,23 @@ func (im *InferenceHandler) CompletionRequestNewHistoryLogic(input *NewHistoryIn
 		}, nil
 	}
 
+	// overlap in types with InferenceBody and ChatSettings, should clean up once InferenceBody is better defined
+	var settings shared.ChatSettings
+	if err := json.Unmarshal(input.Body, &settings); err != nil {
+		log.Warnw("Failed to parse request body for settings", "error", err.Error())
+	}
+	settingsJSON, err := json.Marshal(settings)
+	if err != nil {
+		log.Errorw("Failed to marshal initial settings", "error", err)
+		return &NewHistoryOutput{
+			Error: &HistoryError{
+				StatusCode: 500,
+				Message:    "failed to prepare history",
+				Err:        err,
+			},
+		}, nil
+	}
+
 	// Insert into database
 	insertQuery := `
 		INSERT INTO chat_history (
@@ -133,8 +151,9 @@ func (im *InferenceHandler) CompletionRequestNewHistoryLogic(input *NewHistoryIn
 			history_id,
 			messages,
 			title,
-			icon
-		) VALUES (?, ?, ?, ?, ?)
+			icon,
+			settings
+		) VALUES (?, ?, ?, ?, ?, ?)
 	`
 
 	_, err = im.WDB.Exec(insertQuery,
@@ -143,6 +162,7 @@ func (im *InferenceHandler) CompletionRequestNewHistoryLogic(input *NewHistoryIn
 		string(messagesJSON),
 		title,
 		nil, // icon
+		string(settingsJSON),
 	)
 	if err != nil {
 		log.Errorw("Failed to insert history into database", "error", err)
@@ -215,7 +235,7 @@ func (im *InferenceHandler) CompletionRequestNewHistoryLogic(input *NewHistoryIn
 				Err:        reqErr.Err,
 			},
 		}, nil
-		}
+	}
 
 	if out == nil {
 		return &NewHistoryOutput{
@@ -234,35 +254,35 @@ func (im *InferenceHandler) CompletionRequestNewHistoryLogic(input *NewHistoryIn
 
 	// Update history with assistant response asynchronously
 	if assistantContent != "" {
-	var allMessages []shared.ChatMessage
-	allMessages = append(allMessages, messages...)
+		var allMessages []shared.ChatMessage
+		allMessages = append(allMessages, messages...)
 		allMessages = append(allMessages, shared.ChatMessage{
 			Role:    "assistant",
 			Content: assistantContent,
 		})
 
-	allMessagesJSON, err := json.Marshal(allMessages)
-	if err != nil {
+		allMessagesJSON, err := json.Marshal(allMessages)
+		if err != nil {
 			log.Errorw("Failed to marshal complete messages", "error", err)
 		} else {
-	go func(userID uint64, historyID string, messagesJSON []byte, log *zap.SugaredLogger) {
-		updateQuery := `
+			go func(userID uint64, historyID string, messagesJSON []byte, log *zap.SugaredLogger) {
+				updateQuery := `
 			UPDATE chat_history 
 			SET messages = ?, updated_at = NOW()
 			WHERE history_id = ?
 		`
 
-		_, err := im.WDB.Exec(updateQuery, string(messagesJSON), historyID)
-		if err != nil {
-			log.Errorw("Failed to update history in database", "error", err, "history_id", historyID)
-			return
-		}
+				_, err := im.WDB.Exec(updateQuery, string(messagesJSON), historyID)
+				if err != nil {
+					log.Errorw("Failed to update history in database", "error", err, "history_id", historyID)
+					return
+				}
 
-		log.Infow("Chat history updated with assistant response", "history_id", historyID, "user_id", userID)
+				log.Infow("Chat history updated with assistant response", "history_id", historyID, "user_id", userID)
 
-		if err := im.updateUserStreak(userID, log); err != nil {
-			log.Errorw("Failed to update user streak", "error", err, "user_id", userID)
-		}
+				if err := im.updateUserStreak(userID, log); err != nil {
+					log.Errorw("Failed to update user streak", "error", err, "user_id", userID)
+				}
 			}(input.User.UserID, historyID, allMessagesJSON, log)
 		}
 	}
@@ -343,14 +363,30 @@ func (im *InferenceHandler) UpdateHistoryLogic(input *UpdateHistoryInput) (*Upda
 		}, nil
 	}
 
-	// Update database
-	updateQuery := `
-		UPDATE chat_history 
-		SET messages = ?, updated_at = NOW()
-		WHERE history_id = ?
-	`
+	var args []interface{}
+	updateQuery := `UPDATE chat_history SET messages = ?, updated_at = NOW()`
+	args = append(args, string(messagesJSON))
 
-	_, err = im.WDB.ExecContext(input.Ctx, updateQuery, string(messagesJSON), input.HistoryID)
+	if input.Settings != nil {
+		settingsJSON, err := json.Marshal(input.Settings)
+		if err != nil {
+			log.Errorw("Failed to marshal settings", "error", err)
+			return &UpdateHistoryOutput{
+				Error: &HistoryError{
+					StatusCode: 500,
+					Message:    "internal server error",
+					Err:        err,
+				},
+			}, nil
+		}
+		updateQuery += `, settings = ?`
+		args = append(args, string(settingsJSON))
+	}
+
+	updateQuery += ` WHERE history_id = ?`
+	args = append(args, input.HistoryID)
+
+	_, err = im.WDB.ExecContext(input.Ctx, updateQuery, args...)
 	if err != nil {
 		log.Errorw("Failed to update history in database",
 			"error", err.Error(),
