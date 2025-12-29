@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"time"
 
-	"sybil-api/internal/metrics"
 	"sybil-api/internal/ctx"
+	"sybil-api/internal/metrics"
 	"sybil-api/internal/shared"
 
 	"github.com/aidarkhanov/nanoid"
@@ -21,13 +21,34 @@ func NewTrackMiddleware(log *zap.SugaredLogger) echo.MiddlewareFunc {
 			logger := log.With(
 				"request_id", "req_"+reqID,
 			)
-			logger = logger.With("externalid", c.Request().Header.Get("X-Dippy-Request-Id"))
+			externalID := c.Request().Header.Get("X-External-Request-Id")
+			logger = logger.With("externalid", externalID)
 
-			cc := &ctx.Context{Context: c, Log: logger, Reqid: reqID}
 			start := time.Now()
+			cc := &ctx.Context{Context: c, Log: logger, Reqid: reqID, LogValues: &ctx.ContextLogValues{RequestID: reqID, ExternalID: externalID, StartTime: start, Path: c.Path()}}
 			err := next(cc)
-			duration := time.Since(start)
-			cc.Log.Infow("end_of_request", "status_code", fmt.Sprintf("%d", cc.Response().Status), "duration", duration.String())
+			cc.LogValues.RequestDuration = time.Since(start)
+			status := cc.Response().Status
+			cc.LogValues.StatusCode = status
+
+			// Switch cases are top down, so we make sure to check any overrides
+			// for log levels (usually from streaming requests) before the presented
+			// status code
+			switch true {
+			case cc.LogValues.LogLevel == "ERROR":
+				cc.Log.Errorw("end_of_request", zap.Object("log_values", cc.LogValues))
+			case cc.LogValues.LogLevel == "WARN":
+				cc.Log.Warnw("end_of_request", zap.Object("log_values", cc.LogValues))
+			case cc.LogValues.LogLevel == "INFO":
+				cc.Log.Infow("end_of_request", zap.Object("log_values", cc.LogValues))
+
+			case status < 300:
+				cc.Log.Infow("end_of_request", zap.Object("log_values", cc.LogValues))
+			case status < 500:
+				cc.Log.Warnw("end_of_request", zap.Object("log_values", cc.LogValues))
+			default:
+				cc.Log.Errorw("end_of_request", zap.Object("log_values", cc.LogValues))
+			}
 			metrics.ResponseCodes.WithLabelValues(cc.Path(), fmt.Sprintf("%d", cc.Response().Status)).Inc()
 			return err
 		}

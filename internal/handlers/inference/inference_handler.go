@@ -60,7 +60,7 @@ func NewInferenceHandler(wdb *sql.DB, rdb *sql.DB, redisClient *redis.Client, lo
 func (im *InferenceHandler) getHTTPClient(modelURL string) *http.Client {
 	parsedURL, err := url.Parse(modelURL)
 	if err != nil {
-		im.Log.Warnw("Failed to parse model URL, using full URL as key", "url", modelURL, "error", err)
+		im.Log.Warnw("failed to parse model URL, using full URL as key", "url", modelURL, "error", err)
 		parsedURL = &url.URL{Host: modelURL}
 	}
 	host := parsedURL.Host
@@ -89,7 +89,6 @@ func (im *InferenceHandler) getHTTPClient(modelURL string) *http.Client {
 	client := &http.Client{Transport: tr, Timeout: 10 * time.Minute}
 
 	im.httpClients[host] = client
-	im.Log.Infow("Created new HTTP client for host", "host", host, "full_url", modelURL)
 
 	return client
 }
@@ -104,7 +103,7 @@ func logWithFields(logger *zap.SugaredLogger, fields map[string]string) *zap.Sug
 	if len(fields) == 0 {
 		return logger
 	}
-	args := make([]interface{}, 0, len(fields)*2)
+	args := make([]any, 0, len(fields)*2)
 	for k, v := range fields {
 		args = append(args, k, v)
 	}

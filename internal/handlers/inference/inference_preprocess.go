@@ -13,35 +13,27 @@ type PreprocessInput struct {
 	User      shared.UserMetadata
 	Endpoint  string
 	RequestID string
-	LogFields map[string]string
 }
 
-func (im *InferenceHandler) Preprocess(input PreprocessInput) (*shared.RequestInfo, *shared.RequestError) {
+func (im *InferenceHandler) Preprocess(input PreprocessInput) (*shared.RequestInfo, error) {
 	startTime := time.Now()
-
-	newlog := logWithFields(im.Log, input.LogFields)
 
 	// Unmarshal to generic map to set defaults
 	var payload map[string]any
 	err := json.Unmarshal(input.Body, &payload)
 	if err != nil {
-		newlog.Warnw("failed json unmarshal to payload map", "error", err.Error())
-		return nil, &shared.RequestError{StatusCode: 400, Err: errors.New("malformed request")}
+		return nil, errors.Join(shared.ErrBadRequest, err)
 	}
 
 	// validate models and set defaults
 	model, ok := payload["model"]
 	if !ok {
-		newlog.Infow("missing model parameter", "error", "model is required")
 		return nil, &shared.RequestError{StatusCode: 400, Err: errors.New("model is required")}
 	}
 
 	modelName := model.(string)
 
-	newlog = newlog.With("model", modelName, "endpoint", input.Endpoint)
-
 	if input.Endpoint == shared.ENDPOINTS.EMBEDDING {
-
 		inputField, ok := payload["input"]
 		if !ok {
 			return nil, &shared.RequestError{
@@ -73,7 +65,6 @@ func (im *InferenceHandler) Preprocess(input PreprocessInput) (*shared.RequestIn
 		}
 
 		if (input.User.Credits == 0 && input.User.PlanRequests == 0) && !input.User.AllowOverspend {
-			newlog.Infow("No credits available", "user_id", input.User.UserID)
 			return nil, &shared.RequestError{
 				StatusCode: 402,
 				Err:        errors.New("insufficient credits"),
@@ -82,8 +73,7 @@ func (im *InferenceHandler) Preprocess(input PreprocessInput) (*shared.RequestIn
 
 		body, err := json.Marshal(payload)
 		if err != nil {
-			newlog.Errorw("Failed to marshal request body", "error", err.Error())
-			return nil, &shared.RequestError{StatusCode: 500, Err: errors.New("internal server error")}
+			return nil, errors.Join(&shared.RequestError{StatusCode: 500, Err: errors.New("internal server error")}, err)
 		}
 
 		return &shared.RequestInfo{
@@ -124,10 +114,6 @@ func (im *InferenceHandler) Preprocess(input PreprocessInput) (*shared.RequestIn
 	}
 
 	if (input.User.Credits == 0 && input.User.PlanRequests == 0) && !input.User.AllowOverspend {
-		newlog.Warnw("Insufficient credits or requests",
-			"credits", input.User.Credits,
-			"plan_requests", input.User.PlanRequests,
-			"allow_overspend", input.User.AllowOverspend)
 		return nil, &shared.RequestError{
 			StatusCode: 402,
 			Err:        errors.New("insufficient requests or credits"),
@@ -141,9 +127,6 @@ func (im *InferenceHandler) Preprocess(input PreprocessInput) (*shared.RequestIn
 
 	stream := payload["stream"].(bool)
 
-	// Add stream to logger context
-	newlog = newlog.With("stream", stream)
-
 	// If streaming is enabled (either by default or explicitly), include usage data
 	if stream {
 		payload["stream_options"] = map[string]any{
@@ -151,23 +134,10 @@ func (im *InferenceHandler) Preprocess(input PreprocessInput) (*shared.RequestIn
 		}
 	}
 
-	// Log user id 3's request parameters
-	if input.User.UserID == 3 {
-		newlog.Infow("User 3 request payload",
-			"model", modelName,
-			"stream", stream,
-			"max_tokens", payload["max_tokens"],
-			"temperature", payload["temperature"],
-			"top_p", payload["top_p"],
-			"frequency_penalty", payload["frequency_penalty"],
-			"presence_penalty", payload["presence_penalty"])
-	}
-
 	// repackage body
 	body, err := json.Marshal(payload)
 	if err != nil {
-		newlog.Errorw("Failed to marshal request body", "error", err.Error())
-		return nil, &shared.RequestError{StatusCode: 500, Err: errors.New("internal server error")}
+			return nil, errors.Join(&shared.RequestError{StatusCode: 500, Err: errors.New("internal server error")}, err)
 	}
 
 	reqInfo := &shared.RequestInfo{

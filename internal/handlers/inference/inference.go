@@ -21,21 +21,33 @@ type InferenceInput struct {
 	StreamWriter func(token string) error // callback for real-time streaming
 }
 
-type InferenceOutput struct {
+type InferenceMetadata struct {
 	Stream           bool
-	FinalResponse    []byte
-	ModelID          string
-	TimeToFirstToken time.Duration
-	TotalTime        time.Duration
-	Usage            *shared.Usage
 	Completed        bool
 	Canceled         bool
+	ModelID          uint64
+	ModelName        string
+	TimeToFirstToken time.Duration
+	TotalTime        time.Duration
 }
 
-func (im *InferenceHandler) DoInference(input InferenceInput) (*InferenceOutput, *shared.RequestError) {
+type InferenceOutput struct {
+	FinalResponse []byte
+	ModelCost     *shared.ResponseInfoCost
+	Metadata      *InferenceMetadata
+
+	// This is for mid-stream errors, generally.
+	Error error
+}
+
+// DoInference only returns errors from bad inputs and when output would not exist.
+// A partial stream for instance would not return an error directly but be baked inside of
+// InferenceOutput. The difference is that if we get an error back from DoInference,
+// we can assume no http status code was sent and the router should send them accordingly
+func (im *InferenceHandler) DoInference(input InferenceInput) (*InferenceOutput, error) {
 	if input.Req == nil {
 		return nil, &shared.RequestError{
-			StatusCode: 500,
+			StatusCode: 400,
 			Err:        errors.New("request info missing"),
 		}
 	}
@@ -68,50 +80,25 @@ func (im *InferenceHandler) DoInference(input InferenceInput) (*InferenceOutput,
 		return nil, qerr
 	}
 
-	output := &InferenceOutput{
-		Stream:           reqInfo.Stream,
-		ModelID:          fmt.Sprintf("%d", resInfo.ModelID),
-		TimeToFirstToken: resInfo.TimeToFirstToken,
-		TotalTime:        resInfo.TotalTime,
-		Usage:            resInfo.Usage,
-		Completed:        resInfo.Completed,
-		Canceled:         resInfo.Canceled,
-		FinalResponse:    []byte(resInfo.ResponseContent),
-	}
-
-	log := im.Log.With(
-		"endpoint", reqInfo.Endpoint,
-		"user_id", input.User.UserID,
-		"request_id", reqInfo.ID,
-	)
-
-	if resInfo.ResponseContent == "" || !resInfo.Completed {
-		log.Errorw("No response or incomplete response from model",
-			"response_content_length", len(resInfo.ResponseContent),
-			"completed", resInfo.Completed,
-			"canceled", resInfo.Canceled,
-			"ttft", resInfo.TimeToFirstToken,
-			"total_time", resInfo.TotalTime)
-		return nil, &shared.RequestError{
-			StatusCode: 500,
-			Err:        errors.New("no response from model"),
-		}
+	if len(resInfo.FinalResponse) == 0 || !resInfo.Metadata.Completed {
+		return resInfo, nil
 	}
 
 	go func() {
+		var usage *shared.Usage
 		switch true {
-		case !resInfo.Completed:
+		case !resInfo.Metadata.Completed:
 			break
 		case reqInfo.Stream:
 			var chunks []map[string]any
-			err := json.Unmarshal([]byte(resInfo.ResponseContent), &chunks)
+			err := json.Unmarshal(resInfo.FinalResponse, &chunks)
 			if err != nil {
-				log.Errorw(
+				im.Log.Warnw(
 					"Failed to unmarshal streaming ResponseContent as JSON array of chunks",
 					"error",
 					err,
 					"raw_response_content",
-					resInfo.ResponseContent,
+					string(resInfo.FinalResponse),
 				)
 				break
 			}
@@ -119,10 +106,10 @@ func (im *InferenceHandler) DoInference(input InferenceInput) (*InferenceOutput,
 				usageData, usageFieldExists := chunks[i]["usage"]
 				if usageFieldExists && usageData != nil {
 					if extractedUsage, extractErr := extractUsageData(chunks[i], reqInfo.Endpoint); extractErr == nil {
-						resInfo.Usage = extractedUsage
+						usage = extractedUsage
 						break
 					}
-					log.Warnw(
+					im.Log.Warnw(
 						"Failed to extract usage data from a response chunk that had a non-null usage field",
 						"chunk_index",
 						i,
@@ -132,24 +119,24 @@ func (im *InferenceHandler) DoInference(input InferenceInput) (*InferenceOutput,
 			}
 		case !reqInfo.Stream:
 			var singleResponse map[string]any
-			err := json.Unmarshal([]byte(resInfo.ResponseContent), &singleResponse)
+			err := json.Unmarshal(resInfo.FinalResponse, &singleResponse)
 			if err != nil {
-				log.Errorw(
+				im.Log.Warnw(
 					"Failed to unmarshal non-streaming ResponseContent as single JSON object",
 					"error",
 					err,
 					"raw_response_content",
-					resInfo.ResponseContent,
+					string(resInfo.FinalResponse),
 				)
 				break
 			}
 			usageData, usageFieldExists := singleResponse["usage"]
 			if usageFieldExists && usageData != nil {
 				if extractedUsage, extractErr := extractUsageData(singleResponse, reqInfo.Endpoint); extractErr == nil {
-					resInfo.Usage = extractedUsage
+					usage = extractedUsage
 					break
 				}
-				log.Warnw(
+				im.Log.Warnw(
 					"Failed to extract usage data from single response object that had a non-null usage field",
 				)
 			}
@@ -157,23 +144,23 @@ func (im *InferenceHandler) DoInference(input InferenceInput) (*InferenceOutput,
 			break
 		}
 
-		if resInfo.Usage == nil {
-			resInfo.Usage = &shared.Usage{IsCanceled: resInfo.Canceled}
+		if usage == nil {
+			usage = &shared.Usage{IsCanceled: resInfo.Metadata.Canceled}
 		}
 
-		totalCredits := shared.CalculateCredits(resInfo.Usage, resInfo.Cost.InputCredits, resInfo.Cost.OutputCredits, resInfo.Cost.CanceledCredits)
+		totalCredits := shared.CalculateCredits(usage, resInfo.ModelCost.InputCredits, resInfo.ModelCost.OutputCredits, resInfo.ModelCost.CanceledCredits)
 
 		pqi := &shared.ProcessedQueryInfo{
 			UserID:           reqInfo.UserID,
 			Model:            reqInfo.Model,
-			ModelID:          resInfo.ModelID,
+			ModelID:          resInfo.Metadata.ModelID,
 			Endpoint:         reqInfo.Endpoint,
-			TotalTime:        resInfo.TotalTime,
-			TimeToFirstToken: resInfo.TimeToFirstToken,
-			Usage:            resInfo.Usage,
-			Cost:             resInfo.Cost,
+			TotalTime:        resInfo.Metadata.TotalTime,
+			TimeToFirstToken: resInfo.Metadata.TimeToFirstToken,
+			Usage:            usage,
+			Cost:             *resInfo.ModelCost,
 			TotalCredits:     totalCredits,
-			ResponseContent:  resInfo.ResponseContent,
+			ResponseContent:  string(resInfo.FinalResponse),
 			RequestContent:   reqInfo.Body,
 			CreatedAt:        time.Now(),
 			ID:               reqInfo.ID,
@@ -184,5 +171,5 @@ func (im *InferenceHandler) DoInference(input InferenceInput) (*InferenceOutput,
 		mu.Unlock()
 	}()
 
-	return output, nil
+	return resInfo, nil
 }
