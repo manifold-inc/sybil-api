@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"maps"
 	"strings"
 	"time"
 
@@ -127,20 +126,12 @@ func (im *InferenceHandler) CompletionRequestNewHistoryLogic(input *NewHistoryIn
 	}
 	historyIDJSON, _ := json.Marshal(historyIDEvent)
 
-	// Build logfields for inference
-	inferenceLogFields := map[string]string{}
-	if input.LogFields != nil {
-		maps.Copy(inferenceLogFields, input.LogFields)
-	}
-	inferenceLogFields["history_id"] = historyID
-
 	// Run preprocessing
 	reqInfo, preErr := im.Preprocess(PreprocessInput{
 		Body:      input.Body,
 		User:      input.User,
 		Endpoint:  shared.ENDPOINTS.CHAT,
 		RequestID: input.RequestID,
-		LogFields: inferenceLogFields,
 	})
 
 	if preErr != nil {
@@ -154,7 +145,6 @@ func (im *InferenceHandler) CompletionRequestNewHistoryLogic(input *NewHistoryIn
 		Req:          reqInfo,
 		User:         input.User,
 		Ctx:          input.Ctx,
-		LogFields:    inferenceLogFields,
 		StreamWriter: input.StreamWriter, // Pass through the streaming callback
 	})
 

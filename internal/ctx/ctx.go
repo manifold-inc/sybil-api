@@ -72,10 +72,8 @@ func (c *ContextLogValues) MarshalLogObject(enc zapcore.ObjectEncoder) error {
 		enc.AddBool("completed", c.InfMetadata.Completed)
 		enc.AddBool("canceled", c.InfMetadata.Canceled)
 		enc.AddDuration("total_time", c.InfMetadata.TotalTime)
-		enc.AddString("model_id", c.InfMetadata.ModelID)
-		if c.InfMetadata.Usage != nil {
-			enc.AddString("usage", fmt.Sprintf("%v", *c.InfMetadata.Usage))
-		}
+		enc.AddUint64("model_id", c.InfMetadata.ModelID)
+		enc.AddString("model", c.InfMetadata.ModelName)
 	}
 	enc.AddString("request_id", c.RequestID)
 	enc.AddString("external_id", c.ExternalID)

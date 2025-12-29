@@ -25,31 +25,24 @@ type QueryInput struct {
 }
 
 // QueryModels forwards the request to the appropriate model
-func (im *InferenceHandler) QueryModels(input QueryInput) (*shared.ResponseInfo, *shared.RequestError) {
-	newlog := logWithFields(im.Log, input.LogFields)
-
+func (im *InferenceHandler) QueryModels(input QueryInput) (*InferenceOutput, error) {
 	// Discover inference service
 	modelMetadata, err := im.DiscoverModels(input.Ctx, input.Req.UserID, input.Req.Model)
 	if err != nil {
-		newlog.Errorw("Service discovery failed", "error", err)
-		return nil, &shared.RequestError{
+		return nil, errors.Join(&shared.RequestError{
 			StatusCode: 404,
-			Err:        fmt.Errorf("service not found: %w", err),
-		}
+			Err:        errors.New("model not found"),
+		}, err)
 	}
-
-	// Add model metadata to logger context for all subsequent logs
-	newlog = newlog.With("model_id", modelMetadata.ModelID, "model_url", modelMetadata.URL)
 
 	// Initialize http request
 	route := shared.ROUTES[input.Req.Endpoint]
 	r, err := http.NewRequest("POST", modelMetadata.URL+route, bytes.NewBuffer(input.Req.Body))
 	if err != nil {
-		newlog.Warnw("Failed building request", "error", err.Error())
-		return nil, &shared.RequestError{
+		return nil, errors.Join(&shared.RequestError{
 			StatusCode: 400,
 			Err:        errors.New("failed building request"),
-		}
+		}, err)
 	}
 
 	// Create headers
@@ -68,10 +61,6 @@ func (im *InferenceHandler) QueryModels(input QueryInput) (*shared.ResponseInfo,
 	ctx, cancel := context.WithTimeout(context.Background(), shared.DefaultStreamRequestTimeout)
 	timer := time.AfterFunc(shared.DefaultStreamRequestTimeout, func() {
 		if input.Req.Stream {
-			newlog.Warnw("Stream request timeout triggered",
-				"timeout_seconds", shared.DefaultStreamRequestTimeout.Seconds(),
-				"model", input.Req.Model,
-				"user_id", input.Req.UserID)
 			timeoutOccurred.Store(true)
 			cancel()
 		}
@@ -82,23 +71,13 @@ func (im *InferenceHandler) QueryModels(input QueryInput) (*shared.ResponseInfo,
 	}()
 	r = r.WithContext(ctx)
 
-	preprocessingTime := time.Since(input.Req.StartTime)
-	httpStart := time.Now()
-
-	if input.Ctx.Err() != nil {
-		newlog.Warnw("Client already disconnected before HTTP request",
-			"context_error", input.Ctx.Err())
-	}
-
 	httpClient := im.getHTTPClient(modelMetadata.URL)
 	res, err := httpClient.Do(r)
-	httpDuration := time.Since(httpStart)
-	httpCompletedAt := time.Now()
 
 	defer func() {
 		if res != nil && res.Body != nil {
 			if closeErr := res.Body.Close(); closeErr != nil {
-				newlog.Warnw("Failed to close response body", "error", closeErr)
+				im.Log.Warnw("Failed to close response body", "error", closeErr)
 			}
 		}
 	}()
@@ -106,86 +85,19 @@ func (im *InferenceHandler) QueryModels(input QueryInput) (*shared.ResponseInfo,
 	canceled := input.Ctx.Err() == context.Canceled
 	modelLabel := fmt.Sprintf("%d-%s", modelMetadata.ModelID, input.Req.Model)
 
-	if err != nil {
-		newlog.Errorw("HTTP request failed",
-			"http_duration_ms", httpDuration.Milliseconds(),
-			"error", err.Error(),
-			"canceled", canceled,
-			"timeout_occurred", timeoutOccurred.Load())
-	}
-
+	// Case coldstart
 	if err != nil && timeoutOccurred.Load() {
-		logFields := []interface{}{
-			"model_url", modelMetadata.URL,
-			"timeout_seconds", shared.DefaultStreamRequestTimeout.Seconds(),
-			"http_duration_ms", httpDuration.Milliseconds(),
-			"total_elapsed_ms", time.Since(input.Req.StartTime).Milliseconds(),
-			"preprocessing_ms", preprocessingTime.Milliseconds(),
-			"error", err.Error(),
-			"model", input.Req.Model,
-			"model_id", modelMetadata.ModelID,
-			"endpoint", input.Req.Endpoint,
-			"request_body_size", len(input.Req.Body),
-		}
-
-		if len(input.Req.Body) > 0 {
-			maxBodyLen := 1000
-			reqBodyStr := string(input.Req.Body)
-			if len(reqBodyStr) > maxBodyLen {
-				reqBodyStr = reqBodyStr[:maxBodyLen] + "... (truncated)"
-			}
-			logFields = append(logFields, "request_body", reqBodyStr)
-		}
-
-		if res != nil && res.Body != nil {
-			logFields = append(logFields, "status_code", res.StatusCode)
-			bodyBytes, readErr := io.ReadAll(res.Body)
-			if readErr == nil && len(bodyBytes) > 0 {
-				maxBodyLen := 1000
-				bodyStr := string(bodyBytes)
-				if len(bodyStr) > maxBodyLen {
-					bodyStr = bodyStr[:maxBodyLen] + "... (truncated)"
-				}
-				logFields = append(logFields, "response_body", bodyStr, "response_body_size", len(bodyBytes))
-			} else if readErr != nil {
-				logFields = append(logFields, "body_read_error", readErr.Error())
-			}
-		} else {
-			logFields = append(logFields, "response_available", false)
-		}
-
-		newlog.Errorw("Request timed out - likely due to model cold start", logFields...)
 		metrics.ErrorCount.WithLabelValues(modelLabel, input.Req.Endpoint, fmt.Sprintf("%d", input.Req.UserID), "cold_start").Inc()
 		return nil, &shared.RequestError{StatusCode: 503, Err: errors.New("cold start detected, please try again in a few minutes")}
 	}
 
-	if canceled {
-		newlog.Warnw("Request canceled by client",
-			"http_duration_ms", httpDuration.Milliseconds(),
-			"elapsed_since_start_ms", time.Since(input.Req.StartTime).Milliseconds(),
-			"had_error", err != nil,
-			"will_continue_processing", true)
-		metrics.ErrorCount.WithLabelValues(modelLabel, input.Req.Endpoint, fmt.Sprintf("%d", input.Req.UserID), "client_canceled").Inc()
-		// Don't return error, let it process gracefully
+	if err != nil {
+		return nil, errors.Join(shared.ErrInternalServerError, errors.New("http req to model failed"), err)
 	}
 
-	if err != nil && !canceled {
-		newlog.Warnw("Failed to send request",
-			"error", err,
-			"http_duration_ms", httpDuration.Milliseconds(),
-			"elapsed_since_start_ms", time.Since(input.Req.StartTime).Milliseconds())
-		metrics.ErrorCount.WithLabelValues(modelLabel, input.Req.Endpoint, fmt.Sprintf("%d", input.Req.UserID), "request_failed").Inc()
-		return nil, &shared.RequestError{StatusCode: 502, Err: errors.New("request failed")}
-	}
-	if res != nil && res.StatusCode != http.StatusOK && !canceled {
-		newlog.Warnw("Request failed with non-200 status",
-			"status_code", res.StatusCode,
-			"status", res.Status,
-			"http_duration_ms", httpDuration.Milliseconds(),
-			"elapsed_since_start_ms", time.Since(input.Req.StartTime).Milliseconds(),
-			"returning_early", true)
+	if res != nil && res.StatusCode != http.StatusOK {
 		metrics.ErrorCount.WithLabelValues(modelLabel, input.Req.Endpoint, fmt.Sprintf("%d", input.Req.UserID), "request_failed_from_error_code").Inc()
-		return nil, &shared.RequestError{StatusCode: res.StatusCode, Err: errors.New("request failed")}
+		return nil, errors.Join(&shared.RequestError{StatusCode: res.StatusCode, Err: errors.New("downstream request failed")})
 	}
 
 	// Stream back response
@@ -194,6 +106,7 @@ func (im *InferenceHandler) QueryModels(input QueryInput) (*shared.ResponseInfo,
 	responseContent := ""
 	var ttftRecorded bool
 	hasDone := false
+	var errs error
 
 	if input.Req.Stream && !canceled {
 		reader := bufio.NewScanner(res.Body)
@@ -204,11 +117,9 @@ func (im *InferenceHandler) QueryModels(input QueryInput) (*shared.ResponseInfo,
 		for reader.Scan() {
 			select {
 			case <-ctx.Done():
-				newlog.Warnw("Inference engine request timeout during streaming")
 				break scanner
 			case <-input.Ctx.Done():
 				if !clientDisconnected {
-					newlog.Warnw("Client disconnected during streaming, continuing to read from inference engine")
 					clientDisconnected = true
 				}
 			default:
@@ -222,7 +133,6 @@ func (im *InferenceHandler) QueryModels(input QueryInput) (*shared.ResponseInfo,
 				// Stream token to client immediately via callback (if provided and client still connected)
 				if input.StreamWriter != nil && !clientDisconnected {
 					if err := input.StreamWriter(token); err != nil {
-						newlog.Warnw("Stream writer returned error, client likely disconnected", "error", err)
 						clientDisconnected = true
 					}
 				}
@@ -245,13 +155,6 @@ func (im *InferenceHandler) QueryModels(input QueryInput) (*shared.ResponseInfo,
 					ttft = time.Since(input.Req.StartTime)
 					ttftRecorded = true
 					timer.Stop()
-					// Time from HTTP completion to first token = actual model processing/queue time
-					modelProcessingTime := time.Since(httpCompletedAt)
-					newlog.Infow("First token received",
-						"ttft_ms", ttft.Milliseconds(),
-						"preprocessing_ms", preprocessingTime.Milliseconds(),
-						"http_duration_ms", httpDuration.Milliseconds(),
-						"model_processing_ms", modelProcessingTime.Milliseconds())
 				}
 
 				jsonData := strings.TrimPrefix(token, "data: ")
@@ -264,7 +167,6 @@ func (im *InferenceHandler) QueryModels(input QueryInput) (*shared.ResponseInfo,
 				var rawMessage json.RawMessage
 				err := json.Unmarshal([]byte(jsonData), &rawMessage)
 				if err != nil {
-					newlog.Warnw("failed unmarshaling streamed data", "error", err, "token", token)
 					continue
 				}
 				responses = append(responses, rawMessage)
@@ -276,25 +178,14 @@ func (im *InferenceHandler) QueryModels(input QueryInput) (*shared.ResponseInfo,
 			responseContent = string(responseJSON)
 		}
 		if !hasDone && ctx.Err() == nil {
-			newlog.Errorw("encountered streaming error - no [DONE] marker",
-				"error", errors.New("[DONE] not found"),
-				"responses_received", len(responses),
-				"ttft_recorded", ttftRecorded,
-				"timeout_occurred", timeoutOccurred.Load())
+			errs = errors.Join(errs, errors.New("no [DONE] marker"))
 			metrics.ErrorCount.WithLabelValues(modelLabel, input.Req.Endpoint, fmt.Sprintf("%d", input.Req.UserID), "streaming_no_done").Inc()
 		}
 		if !hasDone && ctx.Err() != nil {
-			newlog.Warnw("streaming incomplete due to context cancellation",
-				"context_error", ctx.Err(),
-				"responses_received", len(responses),
-				"ttft_recorded", ttftRecorded,
-				"timeout_occurred", timeoutOccurred.Load(),
-				"total_elapsed_ms", time.Since(input.Req.StartTime).Milliseconds(),
-				"time_spent_in_http_ms", httpDuration.Milliseconds(),
-				"time_spent_streaming_ms", time.Since(httpCompletedAt).Milliseconds())
+			errs = errors.Join(errs, errors.New("context was unexpectedly canceleld"))
 		}
 		if err := reader.Err(); err != nil && !errors.Is(err, context.Canceled) {
-			newlog.Errorw("encountered streaming error", "error", err)
+			errs = errors.Join(errors.New("encountered streaming error"), err)
 			metrics.ErrorCount.WithLabelValues(modelLabel, input.Req.Endpoint, fmt.Sprintf("%d", input.Req.UserID), "streaming").Inc()
 		}
 	}
@@ -306,9 +197,9 @@ func (im *InferenceHandler) QueryModels(input QueryInput) (*shared.ResponseInfo,
 			hasDone = false
 		}
 		if err != nil && ctx.Err() == nil {
-			newlog.Warnw("Failed to read non-streaming response body", "error", err)
+			errs = errors.Join(errors.New("failed to read non-streaming response body"), err)
 			metrics.ErrorCount.WithLabelValues(modelLabel, input.Req.Endpoint, fmt.Sprintf("%d", input.Req.UserID), "query_model").Inc()
-			return nil, &shared.RequestError{StatusCode: 500, Err: errors.New("failed to read response body")}
+			return nil, errors.Join(&shared.RequestError{StatusCode: 500, Err: errors.New("failed to read response body")}, errs)
 		}
 		responseContent = string(bodyBytes)
 
@@ -316,26 +207,24 @@ func (im *InferenceHandler) QueryModels(input QueryInput) (*shared.ResponseInfo,
 		ttft = time.Since(input.Req.StartTime)
 	}
 
-	resInfo := &shared.ResponseInfo{
-		Canceled:         input.Ctx.Err() == context.Canceled,
-		Completed:        hasDone,
-		TotalTime:        time.Since(input.Req.StartTime),
-		TimeToFirstToken: ttft,
-		ResponseContent:  responseContent,
-		ModelID:          modelMetadata.ModelID,
-		Cost: shared.ResponseInfoCost{
+	resInfo := &InferenceOutput{
+		Metadata: &InferenceMetadata{
+			Canceled:         input.Ctx.Err() == context.Canceled,
+			Completed:        hasDone,
+			TotalTime:        time.Since(input.Req.StartTime),
+			TimeToFirstToken: ttft,
+			ModelID:          modelMetadata.ModelID,
+			Stream:           input.Req.Stream,
+			ModelName:        input.Req.Model,
+		},
+		FinalResponse: []byte(responseContent),
+		ModelCost: &shared.ResponseInfoCost{
 			InputCredits:    modelMetadata.ICPT,
 			OutputCredits:   modelMetadata.OCPT,
 			CanceledCredits: modelMetadata.CRC,
 		},
+		Error: errs,
 	}
-
-	// Log final request state
-	newlog.Infow("Request completed",
-		"completed", resInfo.Completed,
-		"canceled", resInfo.Canceled,
-		"ttft_ms", ttft.Milliseconds(),
-		"total_ms", resInfo.TotalTime.Milliseconds())
 
 	return resInfo, nil
 }
