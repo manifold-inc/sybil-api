@@ -16,20 +16,11 @@ import (
 	"google.golang.org/api/option"
 )
 
-type ClassifyResult struct {
-	NeedsSearch bool
-	Reason      string
-	Confidence  string
-}
-
-type ClassifyFunc func(query string, userID uint64) (*ClassifyResult, error)
-
 type SearchManager struct {
 	GoogleSearchEngineID string
 	GoogleAPIKey         string
 	GoogleService        *customsearch.Service
 	GoogleACURL          string
-	ClassifySearch       ClassifyFunc
 }
 
 func NewSearchManager(gseid, gapikey, gacurl string) (*SearchManager, error) {

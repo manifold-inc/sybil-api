@@ -137,7 +137,7 @@ func main() {
 	defer shutdown()
 
 	if *googleSearchEngineID != "" && *googleAPIKey != "" {
-		searchShutdown, err := routers.RegisterSearchRoutes(base, writeDB, readDB, redisClient, log, *debug, routers.SearchRouterConfig{
+		err := routers.RegisterSearchRoutes(base, routers.SearchRouterConfig{
 			GoogleSearchEngineID: *googleSearchEngineID,
 			GoogleAPIKey:         *googleAPIKey,
 			GoogleACURL:          *googleACURL,
@@ -145,8 +145,7 @@ func main() {
 		if err != nil {
 			panic(err)
 		}
-		defer searchShutdown()
-		log.Info("Search routes registered with classification enabled")
+		log.Info("Search routes registered")
 	}
 
 	go func() {
