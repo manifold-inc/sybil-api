@@ -50,7 +50,7 @@ type NewHistoryOutput struct {
 }
 
 // CompletionRequestNewHistoryLogic initializes a new chat with history for the
-// front end 
+// front end
 // TODO @sean should we create history *after* a request finishes to
 // ensure consistency? in the case a inference request fails at some point
 // before it finishes, we cant save it in the db anyways, and the ux will be
@@ -127,7 +127,7 @@ func (im *InferenceHandler) CompletionRequestNewHistoryLogic(input *NewHistoryIn
 	historyIDJSON, _ := json.Marshal(historyIDEvent)
 
 	// Run preprocessing
-	reqInfo, preErr := im.Preprocess(PreprocessInput{
+	reqInfo, preErr := im.Preprocess(input.Ctx, PreprocessInput{
 		Body:      input.Body,
 		User:      input.User,
 		Endpoint:  shared.ENDPOINTS.CHAT,
@@ -162,7 +162,7 @@ func (im *InferenceHandler) CompletionRequestNewHistoryLogic(input *NewHistoryIn
 
 	// Extract assistant message content from inference output
 	var assistantContent string
-	if out.Metadata.Stream {
+	if reqInfo.Stream {
 		assistantContent = extractContentFromInferenceOutput(out)
 	} else {
 		assistantContent = extractContentFromFinalResponse(out.FinalResponse)
@@ -172,7 +172,7 @@ func (im *InferenceHandler) CompletionRequestNewHistoryLogic(input *NewHistoryIn
 		return &NewHistoryOutput{
 			HistoryID:     historyID,
 			HistoryIDJSON: string(historyIDJSON),
-			Stream:        out.Metadata.Stream,
+			Stream:        reqInfo.Stream,
 			FinalResponse: out.FinalResponse,
 		}, nil
 	}
@@ -212,7 +212,7 @@ func (im *InferenceHandler) CompletionRequestNewHistoryLogic(input *NewHistoryIn
 	return &NewHistoryOutput{
 		HistoryID:     historyID,
 		HistoryIDJSON: string(historyIDJSON),
-		Stream:        out.Metadata.Stream,
+		Stream:        reqInfo.Stream,
 		FinalResponse: out.FinalResponse,
 	}, nil
 }

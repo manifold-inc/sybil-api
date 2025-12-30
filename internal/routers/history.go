@@ -47,12 +47,6 @@ func (ir *InferenceRouter) CompletionRequestNewHistory(cc echo.Context) error {
 	c.Response().Flush()
 	c.LogValues.HistoryID = output.HistoryID
 
-	// TODO @sean why is this here, this makes no sense
-	if !output.Stream && len(output.FinalResponse) > 0 {
-		_, _ = fmt.Fprintf(c.Response(), "data: %s\n\n", string(output.FinalResponse))
-		c.Response().Flush()
-	}
-
 	return nil
 }
 

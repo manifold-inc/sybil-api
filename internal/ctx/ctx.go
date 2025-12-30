@@ -13,6 +13,14 @@ import (
 	"go.uber.org/zap/zapcore"
 )
 
+type InferenceInfo struct {
+	ModelName   string
+	ModelURL    string
+	ModelID     uint64
+	Stream      bool
+	InfMetadata *inference.InferenceMetadata
+}
+
 // ContextLogValues should only be accessed for logging, and not for
 // actual business logic, or any other logic
 type ContextLogValues struct {
@@ -33,7 +41,7 @@ type ContextLogValues struct {
 	Role           string
 
 	// Inference metadata fields
-	InfMetadata *inference.InferenceMetadata
+	InferenceInfo *InferenceInfo
 
 	// History related
 	HistoryID string
@@ -66,14 +74,17 @@ func (c *ContextLogValues) MarshalLogObject(enc zapcore.ObjectEncoder) error {
 		enc.AddBool("store_data", c.StoreData)
 		enc.AddString("role", c.Role)
 	}
-	if c.InfMetadata != nil {
-		enc.AddDuration("ttft", c.InfMetadata.TimeToFirstToken)
-		enc.AddBool("stream", c.InfMetadata.Stream)
-		enc.AddBool("completed", c.InfMetadata.Completed)
-		enc.AddBool("canceled", c.InfMetadata.Canceled)
-		enc.AddDuration("total_time", c.InfMetadata.TotalTime)
-		enc.AddUint64("model_id", c.InfMetadata.ModelID)
-		enc.AddString("model", c.InfMetadata.ModelName)
+	if c.InferenceInfo != nil {
+		enc.AddBool("stream", c.InferenceInfo.Stream)
+		enc.AddString("model_url", c.InferenceInfo.ModelURL)
+		enc.AddUint64("model_id", c.InferenceInfo.ModelID)
+		enc.AddString("model_name", c.InferenceInfo.ModelName)
+		if c.InferenceInfo.InfMetadata != nil {
+			enc.AddDuration("ttft", c.InferenceInfo.InfMetadata.TimeToFirstToken)
+			enc.AddDuration("total_time", c.InferenceInfo.InfMetadata.TotalTime)
+			enc.AddBool("completed", c.InferenceInfo.InfMetadata.Completed)
+			enc.AddBool("canceled", c.InferenceInfo.InfMetadata.Canceled)
+		}
 	}
 	enc.AddString("request_id", c.RequestID)
 	enc.AddString("external_id", c.ExternalID)

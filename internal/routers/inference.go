@@ -5,11 +5,13 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"time"
 
 	"sybil-api/internal/ctx"
+	"sybil-api/internal/handlers/inference"
 	inferenceRoute "sybil-api/internal/handlers/inference"
 	"sybil-api/internal/middleware"
 	"sybil-api/internal/shared"
@@ -77,31 +79,31 @@ func (ir *InferenceRouter) GetModels(cc echo.Context) error {
 }
 
 func (ir *InferenceRouter) ChatRequest(cc echo.Context) error {
-	err := ir.Inference(cc, shared.ENDPOINTS.CHAT)
+	_, err := ir.Inference(cc, shared.ENDPOINTS.CHAT)
 	return err
 }
 
 func (ir *InferenceRouter) CompletionRequest(cc echo.Context) error {
-	err := ir.Inference(cc, shared.ENDPOINTS.COMPLETION)
+	_, err := ir.Inference(cc, shared.ENDPOINTS.COMPLETION)
 	return err
 }
 
 func (ir *InferenceRouter) EmbeddingRequest(cc echo.Context) error {
-	err := ir.Inference(cc, shared.ENDPOINTS.EMBEDDING)
+	_, err := ir.Inference(cc, shared.ENDPOINTS.EMBEDDING)
 	return err
 }
 
 func (ir *InferenceRouter) ResponsesRequest(cc echo.Context) error {
-	err := ir.Inference(cc, shared.ENDPOINTS.RESPONSES)
+	_, err := ir.Inference(cc, shared.ENDPOINTS.RESPONSES)
 	return err
 }
 
-func (ir *InferenceRouter) Inference(cc echo.Context, endpoint string) error {
+func (ir *InferenceRouter) Inference(cc echo.Context, endpoint string) (*inference.InferenceOutput, error) {
 	c := cc.(*ctx.Context)
 	body, err := io.ReadAll(c.Request().Body)
 	if err != nil {
 		c.LogValues.AddError(err)
-		return c.JSON(http.StatusBadRequest, shared.OpenAIError{
+		return nil, c.JSON(http.StatusBadRequest, shared.OpenAIError{
 			Message: "failed to read request body",
 			Object:  "error",
 			Type:    "BadRequest",
@@ -109,7 +111,7 @@ func (ir *InferenceRouter) Inference(cc echo.Context, endpoint string) error {
 		})
 	}
 
-	reqInfo, preErr := ir.ih.Preprocess(inferenceRoute.PreprocessInput{
+	reqInfo, preErr := ir.ih.Preprocess(cc.Request().Context(), inferenceRoute.PreprocessInput{
 		Body:      body,
 		User:      *c.User,
 		Endpoint:  endpoint,
@@ -120,14 +122,14 @@ func (ir *InferenceRouter) Inference(cc echo.Context, endpoint string) error {
 		c.LogValues.AddError(preErr)
 		var rerr *shared.RequestError
 		if errors.As(err, &rerr) {
-			return c.JSON(rerr.StatusCode, shared.OpenAIError{
+			return nil, c.JSON(rerr.StatusCode, shared.OpenAIError{
 				Message: rerr.Error(),
 				Object:  "error",
 				Type:    "InternalError",
 				Code:    rerr.StatusCode,
 			})
 		}
-		return c.JSON(500, shared.OpenAIError{
+		return nil, c.JSON(500, shared.OpenAIError{
 			Message: "internal server error",
 			Object:  "error",
 			Type:    "InternalError",
@@ -135,18 +137,14 @@ func (ir *InferenceRouter) Inference(cc echo.Context, endpoint string) error {
 		})
 	}
 
-	var streamCallback func(token string) error
-	if reqInfo.Stream {
-		setupSSEHeaders(c)
-		streamCallback = createStreamCallback(c)
+	var out *inference.InferenceOutput
+	var reqErr error
+	switch reqInfo.Stream {
+	case true:
+		out, reqErr = ir.StreamInference(c, reqInfo)
+	case false:
+		out, reqErr = ir.NonStreamInference(c, reqInfo)
 	}
-
-	out, reqErr := ir.ih.DoInference(inferenceRoute.InferenceInput{
-		Req:          reqInfo,
-		User:         *c.User,
-		Ctx:          c.Request().Context(),
-		StreamWriter: streamCallback, // Pass the callback for real-time streaming
-	})
 
 	// This is only the case that an error happens and no headers or data has been
 	// sent back. This *should* be a rare case
@@ -156,14 +154,14 @@ func (ir *InferenceRouter) Inference(cc echo.Context, endpoint string) error {
 		var rerr *shared.RequestError
 		// Unkown error, shouldnt really happen
 		if !errors.As(reqErr, &rerr) {
-			return c.JSON(500, shared.OpenAIError{
+			return nil, c.JSON(500, shared.OpenAIError{
 				Message: "unkown internal error",
 				Object:  "error",
 				Type:    "InternalError",
 				Code:    500,
 			})
 		}
-		return c.JSON(rerr.StatusCode, shared.OpenAIError{
+		return nil, c.JSON(rerr.StatusCode, shared.OpenAIError{
 			Message: rerr.Error(),
 			Object:  "error",
 			Type:    "InternalError",
@@ -172,22 +170,69 @@ func (ir *InferenceRouter) Inference(cc echo.Context, endpoint string) error {
 	}
 
 	// Track all metadata for request
-	c.LogValues.InfMetadata = out.Metadata
+	c.LogValues.InferenceInfo = &ctx.InferenceInfo{
+		InfMetadata: out.Metadata,
+		ModelName:   reqInfo.Model,
+		ModelURL:    reqInfo.ModelMetadata.URL,
+		ModelID:     reqInfo.ModelMetadata.ModelID,
+		Stream:      reqInfo.Stream,
+	}
 	c.LogValues.AddError(out.Error)
 	if out.Error != nil {
 		c.LogValues.LogLevel = "ERROR"
 	}
 
-	// Need to actually send back response for non streaming requests
-	if !out.Metadata.Stream {
-		c.Response().Header().Set("Content-Type", "application/json")
-		c.Response().WriteHeader(http.StatusOK)
-		if _, err := c.Response().Write(out.FinalResponse); err != nil {
-			c.LogValues.AddError(errors.Join(errors.New("failed writing final response"), err))
-			c.LogValues.LogLevel = "ERROR"
+	return out, nil
+}
+
+func setupSSEHeaders(c *ctx.Context) {
+	c.Response().Header().Set("Content-Type", "text/event-stream")
+	c.Response().Header().Set("Cache-Control", "no-cache")
+	c.Response().Header().Set("Connection", "keep-alive")
+	c.Response().WriteHeader(http.StatusOK)
+}
+
+func createStreamCallback(c *ctx.Context) func(token string) error {
+	return func(token string) error {
+		if c.Request().Context().Err() != nil {
+			return c.Request().Context().Err()
+		}
+		_, err := fmt.Fprintf(c.Response(), "%s\n\n", token)
+		if err != nil {
 			return err
 		}
+		c.Response().Flush()
+		return nil
 	}
+}
 
-	return nil
+func (ir *InferenceRouter) StreamInference(c *ctx.Context, reqInfo *inference.RequestInfo) (*inference.InferenceOutput, error) {
+	setupSSEHeaders(c)
+	streamCallback := createStreamCallback(c)
+
+	out, reqErr := ir.ih.DoInference(inferenceRoute.InferenceInput{
+		Req:          reqInfo,
+		User:         *c.User,
+		Ctx:          c.Request().Context(),
+		StreamWriter: streamCallback, // Pass the callback for real-time streaming
+	})
+	return out, reqErr
+}
+
+func (ir *InferenceRouter) NonStreamInference(c *ctx.Context, reqInfo *inference.RequestInfo) (*inference.InferenceOutput, error) {
+	out, reqErr := ir.ih.DoInference(inferenceRoute.InferenceInput{
+		Req:  reqInfo,
+		User: *c.User,
+		Ctx:  c.Request().Context(),
+	})
+
+	// Need to actually send back response for non streaming requests
+	c.Response().Header().Set("Content-Type", "application/json")
+	c.Response().WriteHeader(http.StatusOK)
+	if _, err := c.Response().Write(out.FinalResponse); err != nil {
+		c.LogValues.AddError(errors.Join(errors.New("failed writing final response"), err))
+		c.LogValues.LogLevel = "ERROR"
+		return nil, err
+	}
+	return out, reqErr
 }
