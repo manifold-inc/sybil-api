@@ -37,17 +37,15 @@ jobs:
         with:
           images: ghcr.io/${{ github.repository }}
           tags: |
-            type=ref,event=branch
-            type=ref,event=pr,prefix=pr-
-            type=sha
-            type=raw,value=latest,enable={{is_default_branch}}
+            type=sha,prefix=main-,format=long,enable=${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+            type=raw,value=pr-${{ github.event.pull_request.number }}-${{ github.event.pull_request.head.sha }},enable=${{ github.event_name == 'pull_request' }}
 
       - name: Build and Push Docker Image
         uses: docker/build-push-action@v5
         with:
           context: .
           file: ./Dockerfile
-          platforms: linux/amd64
+          platforms: linux/amd64, linux/arm64
           push: ${{ github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}

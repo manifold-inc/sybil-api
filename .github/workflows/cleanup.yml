@@ -1,0 +1,23 @@
+name: Cleanup Sybil-API PR Images
+
+on:
+  pull_request:
+    types: [closed]
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    permissions:
+      packages: write
+
+    steps:
+      - name: Delete old PR package versions
+        uses: actions/delete-package-versions@v5
+        with:
+          package-name: 'targon-cluster/inference-operator'
+          package-type: 'container'
+          token: ${{ secrets.GITHUB_TOKEN }}
+          min-versions-to-keep: 5
+          ignore-versions: '^main-.*$'
+
+
