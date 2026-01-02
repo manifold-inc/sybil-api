@@ -6,14 +6,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"net/http"
 	"strings"
 	"sync/atomic"
 	"time"
 
-	"sybil-api/internal/metrics"
 	"sybil-api/internal/shared"
 )
 
@@ -73,21 +71,17 @@ func (im *InferenceHandler) QueryModels(ctx context.Context, req *RequestInfo, s
 		}
 	}()
 
-	modelLabel := fmt.Sprintf("%d-%s", req.ModelMetadata.ModelID, req.Model)
-
 	// Case coldstart
 	if err != nil && timeoutOccurred.Load() {
-		metrics.ErrorCount.WithLabelValues(modelLabel, req.Endpoint, fmt.Sprintf("%d", req.UserID), "cold_start").Inc()
-		return nil, &shared.RequestError{StatusCode: 503, Err: errors.New("cold start detected, please try again in a few minutes")}
+		return nil, errors.Join(&shared.RequestError{StatusCode: 503, Err: errors.New("cold start detected, please try again in a few minutes")}, shared.ErrColdStart)
 	}
 
 	if err != nil {
-		return nil, errors.Join(shared.ErrInternalServerError, errors.New("http req to model failed"), err)
+		return nil, errors.Join(shared.ErrInternalServerError, shared.ErrFailedModelReq, err)
 	}
 
 	if res != nil && res.StatusCode != http.StatusOK {
-		metrics.ErrorCount.WithLabelValues(modelLabel, req.Endpoint, fmt.Sprintf("%d", req.UserID), "request_failed_from_error_code").Inc()
-		return nil, errors.Join(&shared.RequestError{StatusCode: res.StatusCode, Err: errors.New("downstream request failed")})
+		return nil, errors.Join(&shared.RequestError{StatusCode: res.StatusCode, Err: errors.New("downstream request failed")}, shared.ErrFailedModelReqFromCode)
 	}
 
 	var errs error
@@ -99,9 +93,7 @@ func (im *InferenceHandler) QueryModels(ctx context.Context, req *RequestInfo, s
 			completed = false
 		}
 		if err != nil && rctx.Err() == nil {
-			errs = errors.Join(errors.New("failed to read non-streaming response body"), err)
-			metrics.ErrorCount.WithLabelValues(modelLabel, req.Endpoint, fmt.Sprintf("%d", req.UserID), "query_model").Inc()
-			return nil, errors.Join(&shared.RequestError{StatusCode: 500, Err: errors.New("failed to read response body")}, errs)
+			return nil, errors.Join(&shared.RequestError{StatusCode: 500, Err: errors.New("failed to read response body")}, shared.ErrFailedReadingResponse, err)
 		}
 		resInfo := &InferenceOutput{
 			Metadata: &InferenceMetadata{
@@ -188,14 +180,14 @@ scanner:
 	// shouldnt be able to error since responses is already well formatted json
 	responseBytes, _ := json.Marshal(responses)
 	if rctx.Err() != nil {
-		errs = errors.Join(errs, errors.New("model context canceled"), rctx.Err())
+		errs = errors.Join(errs, shared.ErrModelContext, rctx.Err())
 	}
 	if !hasDone {
-		errs = errors.Join(errs, errors.New("no [DONE] marker"))
+		errs = errors.Join(errs, shared.ErrMissingDoneToken)
 	}
 
 	if reader.Err() != nil && !errors.Is(err, context.Canceled) {
-		errs = errors.Join(errors.New("encountered streaming error"), err)
+		errs = errors.Join(shared.ErrFailedReadingResponse, err)
 	}
 
 	if len(responses) == 0 {

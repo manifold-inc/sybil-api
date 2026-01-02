@@ -114,6 +114,6 @@ var (
 			Help: "Status Codes",
 		},
 		[]string{"path", "status_code"},
-		//we don't need model here because we know what models are being failed from error count
+		// we don't need model here because we know what models are being failed from error count
 	)
 )

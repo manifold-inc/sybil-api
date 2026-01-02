@@ -40,4 +40,24 @@ var (
 	ErrBadRequest          = &RequestError{Err: errors.New("bad request"), StatusCode: 400}
 	ErrNotFound            = &RequestError{Err: errors.New("not found"), StatusCode: 404}
 	ErrPartialSuccess      = &RequestError{Err: errors.New("partial success"), StatusCode: 200}
+
+	ErrColdStart              = &MetricsError{Msg: "model cold start", Code: "model_cold_start"}
+	ErrFailedModelReq         = &MetricsError{Msg: "failed to send http request to model", Code: "model_http_err"}
+	ErrFailedModelReqFromCode = &MetricsError{Msg: "model responded with non-200", Code: "model_http_status_err"}
+	ErrFailedReadingResponse  = &MetricsError{Msg: "failed to read model response", Code: "model_response_err"}
+	ErrMissingDoneToken       = &MetricsError{Msg: "missing [DONE] token", Code: "missing_done_token"}
+	ErrModelContext           = &MetricsError{Msg: "model context canceled", Code: "model_context_err"}
 )
+
+type MetricsError struct {
+	Msg  string
+	Code string
+}
+
+func (m *MetricsError) Error() string {
+	return m.String()
+}
+
+func (m *MetricsError) String() string {
+	return m.Msg
+}
