@@ -48,7 +48,7 @@ func (im *InferenceHandler) QueryModels(ctx context.Context, req *RequestInfo, s
 	}
 	// Handle cold starts - models scaling from 0 can take time to load
 	var timeoutOccurred atomic.Bool
-	ctx, cancel := context.WithTimeout(context.Background(), shared.DefaultStreamRequestTimeout)
+	rctx, cancel := context.WithTimeout(context.Background(), shared.DefaultStreamRequestTimeout)
 	timer := time.AfterFunc(shared.DefaultStreamRequestTimeout, func() {
 		// Timer is redundant for non streaming requests
 		if req.Stream {
@@ -60,7 +60,7 @@ func (im *InferenceHandler) QueryModels(ctx context.Context, req *RequestInfo, s
 		timer.Stop()
 		cancel()
 	}()
-	r = r.WithContext(ctx)
+	r = r.WithContext(rctx)
 
 	httpClient := im.getHTTPClient(req.ModelMetadata.URL)
 	res, err := httpClient.Do(r)
@@ -98,7 +98,7 @@ func (im *InferenceHandler) QueryModels(ctx context.Context, req *RequestInfo, s
 		if err != nil {
 			completed = false
 		}
-		if err != nil && ctx.Err() == nil {
+		if err != nil && rctx.Err() == nil {
 			errs = errors.Join(errors.New("failed to read non-streaming response body"), err)
 			metrics.ErrorCount.WithLabelValues(modelLabel, req.Endpoint, fmt.Sprintf("%d", req.UserID), "query_model").Inc()
 			return nil, errors.Join(&shared.RequestError{StatusCode: 500, Err: errors.New("failed to read response body")}, errs)
@@ -128,7 +128,7 @@ func (im *InferenceHandler) QueryModels(ctx context.Context, req *RequestInfo, s
 scanner:
 	for reader.Scan() {
 		select {
-		case <-ctx.Done():
+		case <-rctx.Done():
 			break scanner
 		case <-ctx.Done():
 			if !clientDisconnected {
@@ -187,8 +187,8 @@ scanner:
 
 	// shouldnt be able to error since responses is already well formatted json
 	responseBytes, _ := json.Marshal(responses)
-	if ctx.Err() != nil {
-		errs = errors.Join(errs, errors.New("model context canceled"), ctx.Err())
+	if rctx.Err() != nil {
+		errs = errors.Join(errs, errors.New("model context canceled"), rctx.Err())
 	}
 	if !hasDone {
 		errs = errors.Join(errs, errors.New("no [DONE] marker"))
