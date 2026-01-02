@@ -12,7 +12,6 @@ import (
 
 	"sybil-api/internal/ctx"
 	"sybil-api/internal/handlers/inference"
-	inferenceRoute "sybil-api/internal/handlers/inference"
 	"sybil-api/internal/middleware"
 	"sybil-api/internal/shared"
 
@@ -22,11 +21,11 @@ import (
 )
 
 type InferenceRouter struct {
-	ih *inferenceRoute.InferenceHandler
+	ih *inference.InferenceHandler
 }
 
 func RegisterInferenceRoutes(e *echo.Group, wdb *sql.DB, rdb *sql.DB, redisClient *redis.Client, log *zap.SugaredLogger, debug bool) (func(), error) {
-	inferenceManager, inferenceErr := inferenceRoute.NewInferenceHandler(wdb, rdb, redisClient, log, debug)
+	inferenceManager, inferenceErr := inference.NewInferenceHandler(wdb, rdb, redisClient, log, debug)
 	if inferenceErr != nil {
 		return nil, inferenceErr
 	}
@@ -53,7 +52,7 @@ func RegisterInferenceRoutes(e *echo.Group, wdb *sql.DB, rdb *sql.DB, redisClien
 }
 
 type ModelList struct {
-	Data []inferenceRoute.Model `json:"data"`
+	Data []inference.Model `json:"data"`
 }
 
 func (ir *InferenceRouter) GetModels(cc echo.Context) error {
@@ -111,7 +110,7 @@ func (ir *InferenceRouter) Inference(cc echo.Context, endpoint string) (*inferen
 		})
 	}
 
-	reqInfo, preErr := ir.ih.Preprocess(cc.Request().Context(), inferenceRoute.PreprocessInput{
+	reqInfo, preErr := ir.ih.Preprocess(cc.Request().Context(), inference.PreprocessInput{
 		Body:      body,
 		User:      *c.User,
 		Endpoint:  endpoint,
@@ -210,7 +209,7 @@ func (ir *InferenceRouter) StreamInference(c *ctx.Context, reqInfo *inference.Re
 	setupSSEHeaders(c)
 	streamCallback := createStreamCallback(c)
 
-	out, reqErr := ir.ih.DoInference(inferenceRoute.InferenceInput{
+	out, reqErr := ir.ih.DoInference(inference.InferenceInput{
 		Req:          reqInfo,
 		User:         *c.User,
 		Ctx:          c.Request().Context(),
@@ -220,7 +219,7 @@ func (ir *InferenceRouter) StreamInference(c *ctx.Context, reqInfo *inference.Re
 }
 
 func (ir *InferenceRouter) NonStreamInference(c *ctx.Context, reqInfo *inference.RequestInfo) (*inference.InferenceOutput, error) {
-	out, reqErr := ir.ih.DoInference(inferenceRoute.InferenceInput{
+	out, reqErr := ir.ih.DoInference(inference.InferenceInput{
 		Req:  reqInfo,
 		User: *c.User,
 		Ctx:  c.Request().Context(),
