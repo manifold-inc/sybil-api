@@ -26,7 +26,7 @@ func NewTrackMiddleware(log *zap.SugaredLogger) echo.MiddlewareFunc {
 			logger = logger.With("externalid", externalID)
 
 			start := time.Now()
-			cc := &ctx.Context{Context: c, Log: logger, Reqid: reqID, LogValues: &ctx.ContextLogValues{RequestID: reqID, ExternalID: externalID, StartTime: start, Path: c.Path()}}
+			cc := &ctx.Context{Context: c, Log: logger, Reqid: reqID, LogValues: &ctx.ContextLogValues{StartTime: start, Path: c.Path()}}
 			err := next(cc)
 			cc.LogValues.RequestDuration = time.Since(start)
 			status := cc.Response().Status

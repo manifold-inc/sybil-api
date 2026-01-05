@@ -25,8 +25,6 @@ type InferenceInfo struct {
 // actual business logic, or any other logic
 type ContextLogValues struct {
 	// Added in base middleware
-	RequestID       string
-	ExternalID      string
 	StartTime       time.Time
 	StatusCode      int
 	RequestDuration time.Duration
@@ -86,8 +84,6 @@ func (c *ContextLogValues) MarshalLogObject(enc zapcore.ObjectEncoder) error {
 			enc.AddBool("canceled", c.InferenceInfo.InfMetadata.Canceled)
 		}
 	}
-	enc.AddString("request_id", c.RequestID)
-	enc.AddString("external_id", c.ExternalID)
 	enc.AddTime("start_time", c.StartTime)
 	enc.AddDuration("request_duration", c.RequestDuration)
 	enc.AddInt("status_code", c.StatusCode)
