@@ -3,6 +3,7 @@ package inference
 import (
 	"encoding/json"
 	"errors"
+	"strings"
 	"time"
 
 	"sybil-api/internal/shared"
@@ -39,6 +40,211 @@ func (im *InferenceHandler) Preprocess(input PreprocessInput) (*shared.RequestIn
 	modelName := model.(string)
 
 	newlog = newlog.With("model", modelName, "endpoint", input.Endpoint)
+
+	if input.Endpoint == shared.ENDPOINTS.GENERATION {
+		prompt, ok := payload["prompt"]
+		if !ok {
+			return nil, &shared.RequestError{
+				StatusCode: 400,
+				Err:        errors.New("prompt is required for image generation"),
+			}
+		}
+
+		promptStr, ok := prompt.(string)
+		if !ok || strings.TrimSpace(promptStr) == "" {
+			return nil, &shared.RequestError{
+				StatusCode: 400,
+				Err:        errors.New("prompt must be a non-empty string"),
+			}
+		}
+
+		if responseFormat, ok := payload["response_format"]; ok && responseFormat != nil {
+			formatStr, ok := responseFormat.(string)
+			if !ok {
+				return nil, &shared.RequestError{
+					StatusCode: 400,
+					Err:        errors.New("response_format must be a string"),
+				}
+			}
+			switch formatStr {
+			case "url", "b64_json":
+			default:
+				return nil, &shared.RequestError{
+					StatusCode: 400,
+					Err:        errors.New("response_format must be 'url' or 'b64_json'"),
+				}
+			}
+		}
+
+		if nValue, ok := payload["n"]; ok && nValue != nil {
+			nFloat, ok := nValue.(float64)
+			if !ok {
+				return nil, &shared.RequestError{
+					StatusCode: 400,
+					Err:        errors.New("n must be a number"),
+				}
+			}
+
+			nInt := int(nFloat)
+			if nInt < 1 || nInt > 10 {
+				return nil, &shared.RequestError{
+					StatusCode: 400,
+					Err:        errors.New("n must be between 1 and 10"),
+				}
+			}
+
+			payload["n"] = nInt
+		}
+
+		payload["prompt"] = promptStr
+		payload["stream"] = false
+	}
+
+	if input.Endpoint == shared.ENDPOINTS.EDITS {
+		prompt, ok := payload["prompt"]
+		if !ok {
+			return nil, &shared.RequestError{
+				StatusCode: 400,
+				Err:        errors.New("prompt is required for image edits"),
+			}
+		}
+
+		promptStr, ok := prompt.(string)
+		if !ok || strings.TrimSpace(promptStr) == "" {
+			return nil, &shared.RequestError{
+				StatusCode: 400,
+				Err:        errors.New("prompt must be a non-empty string"),
+			}
+		}
+
+		imageField, ok := payload["image"]
+		if !ok {
+			return nil, &shared.RequestError{
+				StatusCode: 400,
+				Err:        errors.New("image is required for image edits"),
+			}
+		}
+
+		imageStr, ok := imageField.(string)
+		if !ok || strings.TrimSpace(imageStr) == "" {
+			return nil, &shared.RequestError{
+				StatusCode: 400,
+				Err:        errors.New("image must be a non-empty base64 png string"),
+			}
+		}
+
+		if maskField, ok := payload["mask"]; ok && maskField != nil {
+			maskStr, ok := maskField.(string)
+			if !ok || strings.TrimSpace(maskStr) == "" {
+				return nil, &shared.RequestError{
+					StatusCode: 400,
+					Err:        errors.New("mask must be a non-empty base64 png string"),
+				}
+			}
+			payload["mask"] = maskStr
+		}
+
+		if responseFormat, ok := payload["response_format"]; ok && responseFormat != nil {
+			formatStr, ok := responseFormat.(string)
+			if !ok {
+				return nil, &shared.RequestError{
+					StatusCode: 400,
+					Err:        errors.New("response_format must be a string"),
+				}
+			}
+			switch formatStr {
+			case "url", "b64_json":
+			default:
+				return nil, &shared.RequestError{
+					StatusCode: 400,
+					Err:        errors.New("response_format must be 'url' or 'b64_json'"),
+				}
+			}
+		}
+
+		if nValue, ok := payload["n"]; ok && nValue != nil {
+			nFloat, ok := nValue.(float64)
+			if !ok {
+				return nil, &shared.RequestError{
+					StatusCode: 400,
+					Err:        errors.New("n must be a number"),
+				}
+			}
+
+			nInt := int(nFloat)
+			if nInt < 1 || nInt > 10 {
+				return nil, &shared.RequestError{
+					StatusCode: 400,
+					Err:        errors.New("n must be between 1 and 10"),
+				}
+			}
+
+			payload["n"] = nInt
+		}
+
+		payload["prompt"] = promptStr
+		payload["image"] = imageStr
+		payload["stream"] = false
+	}
+
+	if input.Endpoint == shared.ENDPOINTS.VARIATIONS {
+		imageField, ok := payload["image"]
+		if !ok {
+			return nil, &shared.RequestError{
+				StatusCode: 400,
+				Err:        errors.New("image is required for image variations"),
+			}
+		}
+
+		imageStr, ok := imageField.(string)
+		if !ok || strings.TrimSpace(imageStr) == "" {
+			return nil, &shared.RequestError{
+				StatusCode: 400,
+				Err:        errors.New("image must be a non-empty base64 png string"),
+			}
+		}
+
+		if responseFormat, ok := payload["response_format"]; ok && responseFormat != nil {
+			formatStr, ok := responseFormat.(string)
+			if !ok {
+				return nil, &shared.RequestError{
+					StatusCode: 400,
+					Err:        errors.New("response_format must be a string"),
+				}
+			}
+			switch formatStr {
+			case "url", "b64_json":
+			default:
+				return nil, &shared.RequestError{
+					StatusCode: 400,
+					Err:        errors.New("response_format must be 'url' or 'b64_json'"),
+				}
+			}
+		}
+
+		if nValue, ok := payload["n"]; ok && nValue != nil {
+			nFloat, ok := nValue.(float64)
+			if !ok {
+				return nil, &shared.RequestError{
+					StatusCode: 400,
+					Err:        errors.New("n must be a number"),
+				}
+			}
+
+			nInt := int(nFloat)
+			if nInt < 1 || nInt > 10 {
+				return nil, &shared.RequestError{
+					StatusCode: 400,
+					Err:        errors.New("n must be between 1 and 10"),
+				}
+			}
+
+			payload["n"] = nInt
+		}
+
+		payload["image"] = imageStr
+		payload["stream"] = false
+	}
 
 	if input.Endpoint == shared.ENDPOINTS.EMBEDDING {
 

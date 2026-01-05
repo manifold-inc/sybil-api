@@ -45,6 +45,9 @@ func RegisterInferenceRoutes(e *echo.Group, wdb *sql.DB, rdb *sql.DB, redisClien
 	requireUser.POST("/completions", inferenceRouter.CompletionRequest)
 	requireUser.POST("/embeddings", inferenceRouter.EmbeddingRequest)
 	requireUser.POST("/responses", inferenceRouter.ResponsesRequest)
+	requireUser.POST("/images/generations", inferenceRouter.ImageGenerationRequest)
+	requireUser.POST("/images/edits", inferenceRouter.ImageEditRequest)
+	requireUser.POST("/images/variations", inferenceRouter.ImageVariationRequest)
 	requireUser.POST("/chat/history/new", inferenceRouter.CompletionRequestNewHistory)
 	requireUser.PATCH("/chat/history/:history_id", inferenceRouter.UpdateHistory)
 	return inferenceManager.ShutDown, nil
@@ -100,6 +103,21 @@ func (ir *InferenceRouter) EmbeddingRequest(cc echo.Context) error {
 
 func (ir *InferenceRouter) ResponsesRequest(cc echo.Context) error {
 	_, err := ir.Inference(cc, shared.ENDPOINTS.RESPONSES)
+	return err
+}
+
+func (ir *InferenceRouter) ImageGenerationRequest(cc echo.Context) error {
+	_, err := ir.Inference(cc, shared.ENDPOINTS.GENERATION)
+	return err
+}
+
+func (ir *InferenceRouter) ImageEditRequest(cc echo.Context) error {
+	_, err := ir.Inference(cc, shared.ENDPOINTS.EDITS)
+	return err
+}
+
+func (ir *InferenceRouter) ImageVariationRequest(cc echo.Context) error {
+	_, err := ir.Inference(cc, shared.ENDPOINTS.VARIATIONS)
 	return err
 }
 

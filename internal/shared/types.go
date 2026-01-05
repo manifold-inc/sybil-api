@@ -98,15 +98,21 @@ type Endpoints struct {
 	COMPLETION string
 	EMBEDDING  string
 	RESPONSES  string
+	GENERATION string
+	EDITS	   string
+	VARIATIONS string
 }
 
-var ENDPOINTS = Endpoints{CHAT: "CHAT", COMPLETION: "COMPLETION", EMBEDDING: "EMBEDDING", RESPONSES: "RESPONSES"}
+var ENDPOINTS = Endpoints{CHAT: "CHAT", COMPLETION: "COMPLETION", EMBEDDING: "EMBEDDING", RESPONSES: "RESPONSES", GENERATION: "GENERATION", EDITS: "EDITS", VARIATIONS: "VARIATIONS"}
 
 var ROUTES = map[string]string{
 	ENDPOINTS.CHAT:       "/v1/chat/completions",
 	ENDPOINTS.COMPLETION: "/v1/completions",
 	ENDPOINTS.EMBEDDING:  "/v1/embeddings",
 	ENDPOINTS.RESPONSES:  "/v1/responses",
+	ENDPOINTS.GENERATION: "/v1/images/generations",
+	ENDPOINTS.EDITS:	  "/v1/images/edits",
+	ENDPOINTS.VARIATIONS: "/v1/images/variations",
 }
 
 type RequestInfo struct {
