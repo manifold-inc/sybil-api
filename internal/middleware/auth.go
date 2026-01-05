@@ -64,6 +64,7 @@ func (u *UserMiddleware) ExtractUser(next echo.HandlerFunc) echo.HandlerFunc {
 		}
 		c.User = user
 		c.Log = c.Log.With("user_id", c.User.UserID)
+		c.LogValues.UserID = user.UserID
 		c.LogValues.Credits = user.Credits
 		c.LogValues.PlanRequests = user.PlanRequests
 		c.LogValues.AllowOverspend = user.AllowOverspend
