@@ -95,6 +95,10 @@ func (c *ContextLogValues) MarshalLogObject(enc zapcore.ObjectEncoder) error {
 		errs := shared.StackTrace(c.Error)
 		var finalErr error
 		for _, err := range errs {
+			if finalErr == nil {
+				finalErr = err
+				continue
+			}
 			finalErr = fmt.Errorf("%w: %w", finalErr, err)
 		}
 		enc.AddString("error", finalErr.Error())
