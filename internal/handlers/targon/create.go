@@ -262,8 +262,8 @@ func validateCreateModelRequest(req CreateModelRequest) error {
 	if req.BaseModel == "" {
 		return errors.New("name is required")
 	}
-	if req.Framework != "vllm" && req.Framework != "sglang" {
-		return errors.New("framework must be vllm or sglang")
+	if req.Framework != "vllm" && req.Framework != "sglang" && req.Framework != "tei" {
+		return errors.New("framework must be vllm, sglang, or tei")
 	}
 	if req.FrameworkVersion == "" {
 		return errors.New("framework_version is required")
@@ -363,6 +363,9 @@ func buildTargonRequest(req CreateModelRequest) (TargonCreateRequest, error) {
 	case "sglang":
 		image = fmt.Sprintf("lmsysorg/sglang:%s", version)
 		defaultCommand = []string{"python3", "-m", "sglang.launch_server"}
+	case "tei":
+		image = fmt.Sprintf("ghcr.io/huggingface/text-embeddings-inference:%s", version)
+		defaultCommand = nil
 	default:
 		image = fmt.Sprintf("vllm/vllm-openai:%s", version)
 		defaultCommand = []string{"python3", "-m", "vllm.entrypoints.openai.api_server"}
@@ -381,6 +384,8 @@ func buildTargonRequest(req CreateModelRequest) (TargonCreateRequest, error) {
 		port = 8000
 	case "sglang":
 		port = 30000
+	case "tei":
+		port = 80
 	default:
 		port = 8080
 	}

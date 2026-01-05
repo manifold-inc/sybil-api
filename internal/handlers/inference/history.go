@@ -12,13 +12,13 @@ import (
 	"sybil-api/internal/shared"
 
 	"github.com/aidarkhanov/nanoid"
-	"go.uber.org/zap"
 )
 
 // UpdateHistoryInput contains all inputs needed to update an existing chat history
 type UpdateHistoryInput struct {
 	HistoryID string
 	Messages  []shared.ChatMessage
+	Settings  *shared.ChatSettings
 	UserID    uint64
 	Ctx       context.Context
 	LogFields map[string]string
@@ -97,15 +97,25 @@ func (im *InferenceHandler) CompletionRequestNewHistoryLogic(input *NewHistoryIn
 		return nil, errors.Join(&shared.RequestError{Err: errors.New("failed to prepare history"), StatusCode: 500}, err)
 	}
 
-	// Insert into database
+	// overlap in types with InferenceBody and ChatSettings, should clean up once InferenceBody is better defined
+	var settings shared.ChatSettings
+	if err := json.Unmarshal(input.Body, &settings); err != nil {
+		log.Warnw("Failed to parse request body for settings", "error", err.Error())
+	}
+	settingsJSON, err := json.Marshal(settings)
+	if err != nil {
+		return nil, errors.Join(shared.ErrInternalServerError, errors.New("failed to marshal settings"), err)
+	}
+
 	insertQuery := `
 		INSERT INTO chat_history (
 			user_id,
 			history_id,
 			messages,
 			title,
-			icon
-		) VALUES (?, ?, ?, ?, ?)
+			icon,
+			settings
+		) VALUES (?, ?, ?, ?, ?, ?)
 	`
 
 	_, err = im.WDB.Exec(insertQuery,
@@ -114,6 +124,7 @@ func (im *InferenceHandler) CompletionRequestNewHistoryLogic(input *NewHistoryIn
 		string(messagesJSON),
 		title,
 		nil, // icon
+		string(settingsJSON),
 	)
 	if err != nil {
 		return nil, errors.Join(shared.ErrInternalServerError, errors.New("failed to insert history into db"), err)
@@ -191,7 +202,7 @@ func (im *InferenceHandler) CompletionRequestNewHistoryLogic(input *NewHistoryIn
 		return nil, errors.Join(shared.ErrInternalServerError, errors.New("failed to marshal complete message"), err)
 	}
 
-	go func(userID uint64, historyID string, messagesJSON []byte, log *zap.SugaredLogger) {
+	go func(userID uint64, historyID string, messagesJSON []byte) {
 		updateQuery := `
 			UPDATE chat_history 
 			SET messages = ?, updated_at = NOW()
@@ -200,14 +211,14 @@ func (im *InferenceHandler) CompletionRequestNewHistoryLogic(input *NewHistoryIn
 
 		_, err := im.WDB.Exec(updateQuery, string(messagesJSON), historyID)
 		if err != nil {
-			log.Errorw("Failed to update history in database", "error", err, "history_id", historyID)
+			im.Log.Errorw("Failed to update history in database", "error", err, "history_id", historyID)
 			return
 		}
 
-		if err := im.updateUserStreak(userID, log); err != nil {
-			log.Errorw("Failed to update user streak", "error", err, "user_id", userID)
+		if err := im.updateUserStreak(userID); err != nil {
+			im.Log.Errorw("Failed to update user streak", "error", err, "user_id", userID)
 		}
-	}(input.User.UserID, historyID, allMessagesJSON, log)
+	}(input.User.UserID, historyID, allMessagesJSON)
 
 	return &NewHistoryOutput{
 		HistoryID:     historyID,
@@ -218,8 +229,6 @@ func (im *InferenceHandler) CompletionRequestNewHistoryLogic(input *NewHistoryIn
 }
 
 func (im *InferenceHandler) UpdateHistoryLogic(input *UpdateHistoryInput) (*UpdateHistoryOutput, error) {
-	log := logWithFields(im.Log, input.LogFields)
-
 	// Check if history exists and get owner user ID
 	var ownerUserID uint64
 	checkQuery := `SELECT user_id FROM chat_history WHERE history_id = ?`
@@ -247,24 +256,33 @@ func (im *InferenceHandler) UpdateHistoryLogic(input *UpdateHistoryInput) (*Upda
 		return nil, errors.Join(shared.ErrInternalServerError, err)
 	}
 
-	// Update database
-	updateQuery := `
-		UPDATE chat_history 
-		SET messages = ?, updated_at = NOW()
-		WHERE history_id = ?
-	`
+	var args []any
+	updateQuery := `UPDATE chat_history SET messages = ?, updated_at = NOW()`
+	args = append(args, string(messagesJSON))
 
-	_, err = im.WDB.ExecContext(input.Ctx, updateQuery, string(messagesJSON), input.HistoryID)
+	if input.Settings != nil {
+		settingsJSON, err := json.Marshal(input.Settings)
+		if err != nil {
+			return nil, errors.Join(shared.ErrInternalServerError, errors.New("failed to marshal settings"), err)
+		}
+		updateQuery += `, settings = ?`
+		args = append(args, string(settingsJSON))
+	}
+
+	updateQuery += ` WHERE history_id = ?`
+	args = append(args, input.HistoryID)
+
+	_, err = im.WDB.ExecContext(input.Ctx, updateQuery, args...)
 	if err != nil {
 		return nil, errors.Join(shared.ErrInternalServerError, err)
 	}
 
 	// Update user streak asynchronously
-	go func(userID uint64, log *zap.SugaredLogger) {
-		if err := im.updateUserStreak(userID, log); err != nil {
+	go func(userID uint64) {
+		if err := im.updateUserStreak(userID); err != nil {
 			im.Log.Errorw("Failed to update user streak", "error", err, "user_id", userID)
 		}
-	}(input.UserID, log)
+	}(input.UserID)
 
 	return &UpdateHistoryOutput{
 		HistoryID: input.HistoryID,
@@ -332,7 +350,7 @@ func extractContentFromFinalResponse(finalResponse []byte) string {
 	return ""
 }
 
-func (im *InferenceHandler) updateUserStreak(userID uint64, log *zap.SugaredLogger) error {
+func (im *InferenceHandler) updateUserStreak(userID uint64) error {
 	var lastChatStr sql.NullString
 	var currentStreak uint64
 
@@ -365,7 +383,7 @@ func (im *InferenceHandler) updateUserStreak(userID uint64, log *zap.SugaredLogg
 		}
 
 		if parseErr != nil {
-			log.Warnw("Failed to parse last_chat timestamp", "error", parseErr, "value", lastChatStr.String)
+			im.Log.Warnw("Failed to parse last_chat timestamp", "error", parseErr, "value", lastChatStr.String)
 		}
 	}
 
@@ -404,8 +422,6 @@ func (im *InferenceHandler) updateUserStreak(userID uint64, log *zap.SugaredLogg
 		if err != nil {
 			return fmt.Errorf("failed to update user streak: %w", err)
 		}
-
-		log.Infow("Updated user streak", "user_id", userID, "streak", newStreak, "last_chat", now)
 	} else {
 		_, err = im.WDB.Exec(`
 			UPDATE user 

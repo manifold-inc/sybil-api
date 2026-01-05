@@ -91,6 +91,9 @@ func (c *ContextLogValues) MarshalLogObject(enc zapcore.ObjectEncoder) error {
 		enc.AddString("error", c.Error.Error())
 	}
 	enc.AddString("path", c.Path)
+	if c.HistoryID != "" {
+		enc.AddString("history_id", c.HistoryID)
+	}
 	return nil
 }
 

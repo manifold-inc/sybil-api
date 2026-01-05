@@ -120,7 +120,7 @@ func (ir *InferenceRouter) Inference(cc echo.Context, endpoint string) (*inferen
 	if preErr != nil {
 		c.LogValues.AddError(preErr)
 		var rerr *shared.RequestError
-		if errors.As(err, &rerr) {
+		if errors.As(preErr, &rerr) {
 			return nil, c.JSON(rerr.StatusCode, shared.OpenAIError{
 				Message: rerr.Error(),
 				Object:  "error",
@@ -225,13 +225,17 @@ func (ir *InferenceRouter) NonStreamInference(c *ctx.Context, reqInfo *inference
 		Ctx:  c.Request().Context(),
 	})
 
+	if reqErr != nil {
+		return out, reqErr
+	}
+
 	// Need to actually send back response for non streaming requests
 	c.Response().Header().Set("Content-Type", "application/json")
 	c.Response().WriteHeader(http.StatusOK)
 	if _, err := c.Response().Write(out.FinalResponse); err != nil {
 		c.LogValues.AddError(errors.Join(errors.New("failed writing final response"), err))
 		c.LogValues.LogLevel = "ERROR"
-		return nil, err
+		return out, err
 	}
 	return out, reqErr
 }
