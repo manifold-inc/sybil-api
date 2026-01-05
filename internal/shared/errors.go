@@ -50,7 +50,7 @@ var (
 )
 
 
-// stackTrace unwraps all errors from an error chain
+// StackTrace unwraps all errors from an error chain
 // https://erik.cat/blog/error-wrapping-go/
 func StackTrace(err error) []error {
 	result := make([]error, 0)

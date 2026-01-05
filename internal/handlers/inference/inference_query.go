@@ -116,16 +116,11 @@ func (im *InferenceHandler) QueryModels(ctx context.Context, req *RequestInfo, s
 	reader := bufio.NewScanner(res.Body)
 	var currentEvent string
 
-	clientDisconnected := false
 scanner:
 	for reader.Scan() {
 		select {
 		case <-rctx.Done():
 			break scanner
-		case <-ctx.Done():
-			if !clientDisconnected {
-				clientDisconnected = true
-			}
 		default:
 			token := reader.Text()
 
@@ -135,10 +130,8 @@ scanner:
 			}
 
 			// Stream token to client immediately via callback (if provided and client still connected)
-			if streamWriter != nil && !clientDisconnected {
-				if err := streamWriter(token); err != nil {
-					clientDisconnected = true
-				}
+			if streamWriter != nil && ctx.Err() == nil {
+				_ = streamWriter(token)
 			}
 
 			// Handle Responses API event format
