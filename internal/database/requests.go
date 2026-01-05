@@ -26,7 +26,7 @@ type DailyStats struct {
 	CanceledRequestCount uint64
 }
 
-// SaveRequests saves the request details and updates user credits
+// SaveRequests saves the request details 
 func SaveRequests(db *sql.DB, qim map[string]*shared.ProcessedQueryInfo, log *zap.SugaredLogger) error {
 	requestSQLStr := `INSERT INTO request (
             user_id, request_id, endpoint,

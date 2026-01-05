@@ -4,9 +4,11 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
-	"sybil-api/internal/shared"
 	"time"
+
+	"sybil-api/internal/shared"
 )
 
 type InferenceService struct {
@@ -80,24 +82,18 @@ func (im *InferenceHandler) DiscoverModels(ctx context.Context, userID uint64, m
 		return nil, fmt.Errorf("model not found or not enabled: %s", modelName)
 	}
 	if err != nil {
-		im.Log.Errorw("Database error during model discovery", "error", err, "model_name", modelName)
 		return nil, fmt.Errorf("database error: %w", err)
 	}
 
 	// Check permissions for private models
 	if allowedUserID != nil {
 		if *allowedUserID != userID {
-			im.Log.Warnw("Access denied to private model",
-				"model_name", modelName,
-				"user_id", userID,
-				"allowed_user_id", allowedUserID)
-			return nil, fmt.Errorf("access denied: model is private")
+			return nil, errors.New("user not authorized for this model")
 		}
 	}
 
 	// cache full service
 	go func() {
-
 		cacheCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 
@@ -124,11 +120,6 @@ func (im *InferenceHandler) DiscoverModels(ctx context.Context, userID uint64, m
 				"cache_key", cacheKey)
 		}
 	}()
-
-	im.Log.Infow("Model discovered",
-		"model_name", modelName,
-		"model_id", service.ModelID,
-		"url", service.URL)
 
 	return &service, nil
 }

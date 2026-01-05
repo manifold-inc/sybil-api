@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/manifold-inc/manifold-sdk/lib/utils"
 	"sybil-api/internal/shared"
 )
 
@@ -60,25 +61,21 @@ type ModelMetadata struct {
 	MaxInputLength              *int     `json:"max_input_length,omitempty"`
 }
 
-func (im *InferenceHandler) ListModels(ctx context.Context, userID *uint64, logfields map[string]string) ([]Model, error) {
-	log := logWithFields(im.Log, logfields)
-
+func (im *InferenceHandler) ListModels(ctx context.Context, userID *uint64) ([]Model, error) {
 	if userID != nil {
-		userModels, err := im.queryModels(ctx, logfields, `
+		userModels, _ := im.queryModels(ctx, `
 			SELECT name, DATE_FORMAT(created_at, '%Y-%m-%d %H:%i:%s') as created,
 				icpt, ocpt, crc, metadata, modality, supported_endpoints
 			FROM model 
 			WHERE enabled = true AND allowed_user_id = ?
 			ORDER BY name ASC`, *userID)
 
-		if err != nil {
-			log.Warnw("Error querying user-specific models, falling back to public", "error", err.Error())
-		} else if len(userModels) > 0 {
+		if len(userModels) > 0 {
 			return userModels, nil
 		}
 	}
 
-	return im.queryModels(ctx, logfields, `
+	return im.queryModels(ctx, `
 		SELECT name, DATE_FORMAT(created_at, '%Y-%m-%d %H:%i:%s') as created,
 			icpt, ocpt, crc, metadata, modality, supported_endpoints
 		FROM model 
@@ -86,9 +83,7 @@ func (im *InferenceHandler) ListModels(ctx context.Context, userID *uint64, logf
 		ORDER BY name ASC`)
 }
 
-func (im *InferenceHandler) queryModels(ctx context.Context, logfields map[string]string, query string, args ...any) ([]Model, error) {
-	log := logWithFields(im.Log, logfields)
-
+func (im *InferenceHandler) queryModels(ctx context.Context, query string, args ...any) ([]Model, error) {
 	rows, err := im.RDB.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
@@ -101,17 +96,15 @@ func (im *InferenceHandler) queryModels(ctx context.Context, logfields map[strin
 	for rows.Next() {
 		model, err := scanModel(rows)
 		if err != nil {
-			log.Warnw("Failed to scan model row", "error", err.Error())
+			im.Log.Warnw("Failed to scan model row", "error", err.Error(), "args", fmt.Sprintf("%v", args))
 			continue
 		}
 		models = append(models, model)
 	}
 
 	if err := rows.Err(); err != nil {
-		log.Errorw("Error iterating over rows", "error", err.Error())
-		return nil, err
+		return nil, utils.Wrap("Error iterating over queryModels rows", err)
 	}
-
 	return models, nil
 }
 

@@ -4,13 +4,14 @@ package routers
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"time"
 
 	"sybil-api/internal/ctx"
-	inferenceRoute "sybil-api/internal/handlers/inference"
+	"sybil-api/internal/handlers/inference"
 	"sybil-api/internal/middleware"
 	"sybil-api/internal/shared"
 
@@ -20,11 +21,11 @@ import (
 )
 
 type InferenceRouter struct {
-	ih *inferenceRoute.InferenceHandler
+	ih *inference.InferenceHandler
 }
 
 func RegisterInferenceRoutes(e *echo.Group, wdb *sql.DB, rdb *sql.DB, redisClient *redis.Client, log *zap.SugaredLogger, debug bool) (func(), error) {
-	inferenceManager, inferenceErr := inferenceRoute.NewInferenceHandler(wdb, rdb, redisClient, log, debug)
+	inferenceManager, inferenceErr := inference.NewInferenceHandler(wdb, rdb, redisClient, log, debug)
 	if inferenceErr != nil {
 		return nil, inferenceErr
 	}
@@ -51,7 +52,7 @@ func RegisterInferenceRoutes(e *echo.Group, wdb *sql.DB, rdb *sql.DB, redisClien
 }
 
 type ModelList struct {
-	Data []inferenceRoute.Model `json:"data"`
+	Data []inference.Model `json:"data"`
 }
 
 func (ir *InferenceRouter) GetModels(cc echo.Context) error {
@@ -60,21 +61,14 @@ func (ir *InferenceRouter) GetModels(cc echo.Context) error {
 	ctx, cancel := context.WithTimeout(c.Request().Context(), 5*time.Second)
 	defer cancel()
 
-	logfields := map[string]string{
-		"endpoint": "models",
-	}
-	if c.User != nil {
-		logfields["user_id"] = fmt.Sprintf("%d", c.User.UserID)
-	}
-
 	var userID *uint64
 	if c.User != nil {
 		userID = &c.User.UserID
 	}
 
-	models, err := ir.ih.ListModels(ctx, userID, logfields)
+	models, err := ir.ih.ListModels(ctx, userID)
 	if err != nil {
-		c.Log.Errorw("Failed to get models", "error", err.Error())
+		c.LogValues.AddError(errors.Join(errors.New("failed to get models"), err))
 		return cc.String(500, "Failed to get models")
 	}
 
@@ -103,11 +97,12 @@ func (ir *InferenceRouter) ResponsesRequest(cc echo.Context) error {
 	return err
 }
 
-func (ir *InferenceRouter) Inference(cc echo.Context, endpoint string) (string, error) {
+func (ir *InferenceRouter) Inference(cc echo.Context, endpoint string) (*inference.InferenceOutput, error) {
 	c := cc.(*ctx.Context)
-	body, err := readRequestBody(c)
+	body, err := io.ReadAll(c.Request().Body)
 	if err != nil {
-		return "", c.JSON(http.StatusBadRequest, shared.OpenAIError{
+		c.LogValues.AddError(err)
+		return nil, c.JSON(http.StatusBadRequest, shared.OpenAIError{
 			Message: "failed to read request body",
 			Object:  "error",
 			Type:    "BadRequest",
@@ -115,167 +110,132 @@ func (ir *InferenceRouter) Inference(cc echo.Context, endpoint string) (string, 
 		})
 	}
 
-	logfields := buildLogFields(c, endpoint, nil)
-
-	reqInfo, preErr := ir.ih.Preprocess(inferenceRoute.PreprocessInput{
+	reqInfo, preErr := ir.ih.Preprocess(cc.Request().Context(), inference.PreprocessInput{
 		Body:      body,
 		User:      *c.User,
 		Endpoint:  endpoint,
 		RequestID: c.Reqid,
-		LogFields: logfields,
 	})
+
 	if preErr != nil {
-		message := "inference error"
-		if preErr.Err != nil {
-			message = preErr.Err.Error()
+		c.LogValues.AddError(preErr)
+		var rerr *shared.RequestError
+		if errors.As(preErr, &rerr) {
+			return nil, c.JSON(rerr.StatusCode, shared.OpenAIError{
+				Message: rerr.Error(),
+				Object:  "error",
+				Type:    "InternalError",
+				Code:    rerr.StatusCode,
+			})
 		}
-		return "", c.JSON(preErr.StatusCode, shared.OpenAIError{
-			Message: message,
+		return nil, c.JSON(500, shared.OpenAIError{
+			Message: "internal server error",
 			Object:  "error",
 			Type:    "InternalError",
-			Code:    preErr.StatusCode,
+			Code:    500,
 		})
 	}
 
-	var streamCallback func(token string) error
-	if reqInfo.Stream {
-		setupSSEHeaders(c)
-		streamCallback = createStreamCallback(c)
+	var out *inference.InferenceOutput
+	var reqErr error
+	switch reqInfo.Stream {
+	case true:
+		out, reqErr = ir.StreamInference(c, reqInfo)
+	case false:
+		out, reqErr = ir.NonStreamInference(c, reqInfo)
 	}
 
-	out, reqErr := ir.ih.DoInference(inferenceRoute.InferenceInput{
-		Req:          reqInfo,
-		User:         *c.User,
-		Ctx:          c.Request().Context(),
-		LogFields:    logfields,
-		StreamWriter: streamCallback, // Pass the callback for real-time streaming
-	})
-
+	// This is only the case that an error happens and no headers or data has been
+	// sent back. This *should* be a rare case
 	if reqErr != nil {
-		if reqErr.StatusCode >= 500 && reqErr.Err != nil {
-			c.Log.Warnw("Inference error", "error", reqErr.Err.Error())
+		c.LogValues.AddError(reqErr)
+		c.LogValues.LogLevel = "ERROR"
+		var rerr *shared.RequestError
+		// Unkown error, shouldnt really happen
+		if !errors.As(reqErr, &rerr) {
+			return nil, c.JSON(500, shared.OpenAIError{
+				Message: "unkown internal error",
+				Object:  "error",
+				Type:    "InternalError",
+				Code:    500,
+			})
 		}
-		message := "inference error"
-		if reqErr.Err != nil {
-			message = reqErr.Err.Error()
-		}
-
-		if reqInfo.Stream {
-			c.Log.Errorw("Error after streaming started", "error", message)
-			return "", nil
-		}
-
-		return "", c.JSON(reqErr.StatusCode, shared.OpenAIError{
-			Message: message,
+		return nil, c.JSON(rerr.StatusCode, shared.OpenAIError{
+			Message: rerr.Error(),
 			Object:  "error",
 			Type:    "InternalError",
-			Code:    reqErr.StatusCode,
+			Code:    rerr.StatusCode,
 		})
 	}
 
-	if out == nil {
-		return "", nil
+	// Track all metadata for request
+	c.LogValues.InferenceInfo = &ctx.InferenceInfo{
+		InfMetadata: out.Metadata,
+		ModelName:   reqInfo.Model,
+		ModelURL:    reqInfo.ModelMetadata.URL,
+		ModelID:     reqInfo.ModelMetadata.ModelID,
+		Stream:      reqInfo.Stream,
+	}
+	c.LogValues.AddError(out.Error)
+	if out.Error != nil {
+		c.LogValues.LogLevel = "ERROR"
 	}
 
-	if out.Stream {
-		return string(out.FinalResponse), nil
-	}
-
-	c.Response().Header().Set("Content-Type", "application/json")
-	c.Response().WriteHeader(http.StatusOK)
-	if _, err := c.Response().Write(out.FinalResponse); err != nil {
-		c.Log.Errorw("Failed to write response", "error", err)
-		return "", err
-	}
-	return string(out.FinalResponse), nil
+	return out, nil
 }
 
-func (ir *InferenceRouter) CompletionRequestNewHistory(cc echo.Context) error {
-	c := cc.(*ctx.Context)
+func setupSSEHeaders(c *ctx.Context) {
+	c.Response().Header().Set("Content-Type", "text/event-stream")
+	c.Response().Header().Set("Cache-Control", "no-cache")
+	c.Response().Header().Set("Connection", "keep-alive")
+	c.Response().WriteHeader(http.StatusOK)
+}
 
-	body, err := readRequestBody(c)
-	if err != nil {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "failed to read request body"})
+func createStreamCallback(c *ctx.Context) func(token string) error {
+	return func(token string) error {
+		if c.Request().Context().Err() != nil {
+			return c.Request().Context().Err()
+		}
+		_, err := fmt.Fprintf(c.Response(), "%s\n\n", token)
+		if err != nil {
+			return err
+		}
+		c.Response().Flush()
+		return nil
 	}
+}
 
-	logfields := buildLogFields(c, shared.ENDPOINTS.CHAT, nil)
-
+func (ir *InferenceRouter) StreamInference(c *ctx.Context, reqInfo *inference.RequestInfo) (*inference.InferenceOutput, error) {
 	setupSSEHeaders(c)
 	streamCallback := createStreamCallback(c)
 
-	output, err := ir.ih.CompletionRequestNewHistoryLogic(&inferenceRoute.NewHistoryInput{
-		Body:         body,
+	out, reqErr := ir.ih.DoInference(inference.InferenceInput{
+		Req:          reqInfo,
 		User:         *c.User,
-		RequestID:    c.Reqid,
 		Ctx:          c.Request().Context(),
-		LogFields:    logfields,
-		StreamWriter: streamCallback, // Pass callback for real-time streaming
+		StreamWriter: streamCallback, // Pass the callback for real-time streaming
 	})
-	if err != nil {
-		c.Log.Errorw("History creation failed", "error", err)
-		return nil
-	}
-
-	if output.Error != nil {
-		c.Log.Errorw("History logic error", "error", output.Error.Message)
-		return nil
-	}
-
-	_, _ = fmt.Fprintf(c.Response(), "data: %s\n\n", output.HistoryIDJSON)
-	c.Response().Flush()
-
-	if !output.Stream && len(output.FinalResponse) > 0 {
-		_, _ = fmt.Fprintf(c.Response(), "data: %s\n\n", string(output.FinalResponse))
-		c.Response().Flush()
-	}
-
-	return nil
+	return out, reqErr
 }
 
-type UpdateHistoryRequest struct {
-	Messages []shared.ChatMessage `json:"messages,omitempty"`
-	Settings shared.ChatSettings  `json:"settings,omitempty"`
-}
-
-// UpdateHistory is the HTTP handler wrapper for the history update logic
-func (ir *InferenceRouter) UpdateHistory(cc echo.Context) error {
-	c := cc.(*ctx.Context)
-
-	body, err := readRequestBody(c)
-	if err != nil {
-		return c.JSON(http.StatusInternalServerError, shared.ErrInternalServerError)
-	}
-
-	var req UpdateHistoryRequest
-	if err := json.Unmarshal(body, &req); err != nil {
-		c.Log.Errorw("Failed to unmarshal request body", "error", err.Error())
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid JSON format"})
-	}
-
-	historyID := c.Param("history_id")
-
-	logfields := buildLogFields(c, shared.ENDPOINTS.CHAT, map[string]string{"history_id": historyID})
-
-	output, err := ir.ih.UpdateHistoryLogic(&inferenceRoute.UpdateHistoryInput{
-		HistoryID: historyID,
-		Messages:  req.Messages,
-		Settings:  &req.Settings,
-		UserID:    c.User.UserID,
-		Ctx:       c.Request().Context(),
-		LogFields: logfields,
+func (ir *InferenceRouter) NonStreamInference(c *ctx.Context, reqInfo *inference.RequestInfo) (*inference.InferenceOutput, error) {
+	out, reqErr := ir.ih.DoInference(inference.InferenceInput{
+		Req:  reqInfo,
+		User: *c.User,
+		Ctx:  c.Request().Context(),
 	})
-	if err != nil {
-		c.Log.Errorw("History update failed", "error", err)
-		return c.JSON(http.StatusInternalServerError, shared.ErrInternalServerError)
+
+	if reqErr != nil {
+		return out, reqErr
 	}
 
-	if output.Error != nil {
-		return c.JSON(output.Error.StatusCode, map[string]string{"error": output.Error.Message})
+	// Need to actually send back response for non streaming requests
+	c.Response().Header().Set("Content-Type", "application/json")
+	c.Response().WriteHeader(http.StatusOK)
+	if _, err := c.Response().Write(out.FinalResponse); err != nil {
+		c.LogValues.AddError(errors.Join(errors.New("failed writing final response"), err))
+		c.LogValues.LogLevel = "ERROR"
+		return out, err
 	}
-
-	return c.JSON(http.StatusOK, map[string]any{
-		"message": output.Message,
-		"id":      output.HistoryID,
-		"user_id": output.UserID,
-	})
+	return out, reqErr
 }

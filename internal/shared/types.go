@@ -1,7 +1,6 @@
 package shared
 
 import (
-	"fmt"
 	"time"
 )
 
@@ -74,29 +73,6 @@ type SearchResponseBody struct {
 	Suggestions     []string        `json:"suggestions,omitempty"`
 }
 
-type Event struct {
-	Event string         `json:"event"`
-	ID    string         `json:"id"`
-	Retry int            `json:"retry"`
-	Data  map[string]any `json:"data"`
-}
-
-type ErrorReport struct {
-	Service   string `json:"service"`
-	Endpoint  string `json:"endpoint"`
-	Error     string `json:"error"`
-	Traceback string `json:"traceback,omitempty"`
-}
-
-type RequestError struct {
-	StatusCode int
-	Err        error
-}
-
-func (r *RequestError) Error() string {
-	return fmt.Sprintf("status %d: err %v", r.StatusCode, r.Err)
-}
-
 type UserMetadata struct {
 	Email          string `json:"email,omitempty"`
 	UserID         uint64 `json:"user_id,omitempty"`
@@ -124,19 +100,6 @@ var ROUTES = map[string]string{
 	ENDPOINTS.RESPONSES:  "/v1/responses",
 }
 
-type RequestInfo struct {
-	Body      []byte
-	UserID    uint64
-	Credits   uint64
-	StoreData bool
-	ID        string
-	StartTime time.Time
-	Endpoint  string
-	Model     string
-	Stream    bool
-	URL       string
-}
-
 type ProcessedQueryInfo struct {
 	CreatedAt        time.Time
 	UserID           uint64
@@ -146,11 +109,7 @@ type ProcessedQueryInfo struct {
 	TotalTime        time.Duration
 	TimeToFirstToken time.Duration
 	Usage            *Usage
-	Cost             ResponseInfoCost
 	TotalCredits     uint64
-	ID               string
-	ResponseContent  string
-	RequestContent   []byte
 }
 
 // Usage tracks token usage for API requests
@@ -159,23 +118,6 @@ type Usage struct {
 	CompletionTokens uint64
 	TotalTokens      uint64
 	IsCanceled       bool
-}
-
-// ResponseInfo contains information about the completed request
-type ResponseInfo struct {
-	ModelID          uint64
-	Completed        bool
-	Canceled         bool
-	TotalTime        time.Duration
-	TimeToFirstToken time.Duration
-	Usage            *Usage
-	ResponseContent  string
-	Cost             ResponseInfoCost
-}
-type ResponseInfoCost struct {
-	InputCredits    uint64
-	OutputCredits   uint64
-	CanceledCredits uint64
 }
 
 type OpenAIError struct {
