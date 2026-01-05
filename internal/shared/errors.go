@@ -49,6 +49,31 @@ var (
 	ErrModelContext           = &MetricsError{Msg: "model context canceled", Code: "model_context_err"}
 )
 
+
+// stackTrace unwraps all errors from an error chain
+// https://erik.cat/blog/error-wrapping-go/
+func StackTrace(err error) []error {
+	result := make([]error, 0)
+	if err == nil {
+		return result
+	}
+
+	// Unwrap joined errors and ignore the join itself.
+	if e, ok := err.(interface {
+		Unwrap() []error
+	}); ok {
+		for _, err := range e.Unwrap() {
+			result = append(result, StackTrace(err)...)
+		}
+
+		return result
+	}
+
+	// We can ignore the wrapped error, as it's contained
+	// in the fmt.Errorf string.
+	return append(result, err)
+}
+
 type MetricsError struct {
 	Msg  string
 	Code string
@@ -61,3 +86,4 @@ func (m *MetricsError) Error() string {
 func (m *MetricsError) String() string {
 	return m.Msg
 }
+

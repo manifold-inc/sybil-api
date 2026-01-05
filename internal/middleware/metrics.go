@@ -56,7 +56,7 @@ func NewTrackMiddleware(log *zap.SugaredLogger) echo.MiddlewareFunc {
 			if cc.LogValues.InferenceInfo != nil {
 				modelName = cc.LogValues.InferenceInfo.ModelName
 			}
-			errs := stackTrace(cc.LogValues.Error)
+			errs := shared.StackTrace(cc.LogValues.Error)
 			for _, err := range errs {
 				var e *shared.MetricsError
 				if ok := errors.As(err, &e); ok {
@@ -79,28 +79,4 @@ func NewRecoverMiddleware(log *zap.SugaredLogger) echo.MiddlewareFunc {
 			return c.String(500, shared.ErrInternalServerError.Err.Error())
 		},
 	})
-}
-
-// stackTrace unwraps all errors from an error chain
-// https://erik.cat/blog/error-wrapping-go/
-func stackTrace(err error) []error {
-	result := make([]error, 0)
-	if err == nil {
-		return result
-	}
-
-	// Unwrap joined errors and ignore the join itself.
-	if e, ok := err.(interface {
-		Unwrap() []error
-	}); ok {
-		for _, err := range e.Unwrap() {
-			result = append(result, stackTrace(err)...)
-		}
-
-		return result
-	}
-
-	// We can ignore the wrapped error, as it's contained
-	// in the fmt.Errorf string.
-	return append(result, err)
 }

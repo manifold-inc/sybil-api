@@ -92,7 +92,12 @@ func (c *ContextLogValues) MarshalLogObject(enc zapcore.ObjectEncoder) error {
 	enc.AddDuration("request_duration", c.RequestDuration)
 	enc.AddInt("status_code", c.StatusCode)
 	if c.Error != nil {
-		enc.AddString("error", c.Error.Error())
+		errs := shared.StackTrace(c.Error)
+		var finalErr error
+		for _, err := range errs {
+			finalErr = fmt.Errorf("%w: %w", finalErr, err)
+		}
+		enc.AddString("error", finalErr.Error())
 	}
 	enc.AddString("path", c.Path)
 	if c.HistoryID != "" {
