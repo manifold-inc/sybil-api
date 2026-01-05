@@ -1,8 +1,14 @@
 package inference
 
 import (
+	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"io"
+	"mime"
+	"mime/multipart"
+	"strconv"
 	"strings"
 	"time"
 
@@ -10,11 +16,12 @@ import (
 )
 
 type PreprocessInput struct {
-	Body      []byte
-	User      shared.UserMetadata
-	Endpoint  string
-	RequestID string
-	LogFields map[string]string
+	Body        []byte
+	User        shared.UserMetadata
+	Endpoint    string
+	RequestID   string
+	ContentType string
+	LogFields   map[string]string
 }
 
 func (im *InferenceHandler) Preprocess(input PreprocessInput) (*shared.RequestInfo, *shared.RequestError) {
@@ -22,12 +29,21 @@ func (im *InferenceHandler) Preprocess(input PreprocessInput) (*shared.RequestIn
 
 	newlog := logWithFields(im.Log, input.LogFields)
 
-	// Unmarshal to generic map to set defaults
+	isMultipart := strings.HasPrefix(strings.ToLower(input.ContentType), "multipart/form-data")
+
 	var payload map[string]any
-	err := json.Unmarshal(input.Body, &payload)
-	if err != nil {
-		newlog.Warnw("failed json unmarshal to payload map", "error", err.Error())
-		return nil, &shared.RequestError{StatusCode: 400, Err: errors.New("malformed request")}
+	if isMultipart && (input.Endpoint == shared.ENDPOINTS.EDITS || input.Endpoint == shared.ENDPOINTS.VARIATIONS) {
+		parsed, perr := parseMultipartPayload(input.Body, input.ContentType)
+		if perr != nil {
+			return nil, perr
+		}
+		payload = parsed
+	} else {
+		err := json.Unmarshal(input.Body, &payload)
+		if err != nil {
+			newlog.Warnw("failed json unmarshal to payload map", "error", err.Error())
+			return nil, &shared.RequestError{StatusCode: 400, Err: errors.New("malformed request")}
+		}
 	}
 
 	// validate models and set defaults
@@ -76,24 +92,8 @@ func (im *InferenceHandler) Preprocess(input PreprocessInput) (*shared.RequestIn
 			}
 		}
 
-		if nValue, ok := payload["n"]; ok && nValue != nil {
-			nFloat, ok := nValue.(float64)
-			if !ok {
-				return nil, &shared.RequestError{
-					StatusCode: 400,
-					Err:        errors.New("n must be a number"),
-				}
-			}
-
-			nInt := int(nFloat)
-			if nInt < 1 || nInt > 10 {
-				return nil, &shared.RequestError{
-					StatusCode: 400,
-					Err:        errors.New("n must be between 1 and 10"),
-				}
-			}
-
-			payload["n"] = nInt
+		if err := validateAndSetN(payload); err != nil {
+			return nil, err
 		}
 
 		payload["prompt"] = promptStr
@@ -162,24 +162,8 @@ func (im *InferenceHandler) Preprocess(input PreprocessInput) (*shared.RequestIn
 			}
 		}
 
-		if nValue, ok := payload["n"]; ok && nValue != nil {
-			nFloat, ok := nValue.(float64)
-			if !ok {
-				return nil, &shared.RequestError{
-					StatusCode: 400,
-					Err:        errors.New("n must be a number"),
-				}
-			}
-
-			nInt := int(nFloat)
-			if nInt < 1 || nInt > 10 {
-				return nil, &shared.RequestError{
-					StatusCode: 400,
-					Err:        errors.New("n must be between 1 and 10"),
-				}
-			}
-
-			payload["n"] = nInt
+		if err := validateAndSetN(payload); err != nil {
+			return nil, err
 		}
 
 		payload["prompt"] = promptStr
@@ -222,24 +206,8 @@ func (im *InferenceHandler) Preprocess(input PreprocessInput) (*shared.RequestIn
 			}
 		}
 
-		if nValue, ok := payload["n"]; ok && nValue != nil {
-			nFloat, ok := nValue.(float64)
-			if !ok {
-				return nil, &shared.RequestError{
-					StatusCode: 400,
-					Err:        errors.New("n must be a number"),
-				}
-			}
-
-			nInt := int(nFloat)
-			if nInt < 1 || nInt > 10 {
-				return nil, &shared.RequestError{
-					StatusCode: 400,
-					Err:        errors.New("n must be between 1 and 10"),
-				}
-			}
-
-			payload["n"] = nInt
+		if err := validateAndSetN(payload); err != nil {
+			return nil, err
 		}
 
 		payload["image"] = imageStr
@@ -388,4 +356,93 @@ func (im *InferenceHandler) Preprocess(input PreprocessInput) (*shared.RequestIn
 	}
 
 	return reqInfo, nil
+}
+
+func parseMultipartPayload(body []byte, contentType string) (map[string]any, *shared.RequestError) {
+	_, params, err := mime.ParseMediaType(contentType)
+	if err != nil {
+		return nil, &shared.RequestError{StatusCode: 400, Err: errors.New("invalid content type")}
+	}
+
+	boundary, ok := params["boundary"]
+	if !ok || strings.TrimSpace(boundary) == "" {
+		return nil, &shared.RequestError{StatusCode: 400, Err: errors.New("missing multipart boundary")}
+	}
+
+	reader := multipart.NewReader(bytes.NewReader(body), boundary)
+	payload := make(map[string]any)
+
+	for {
+		part, err := reader.NextPart()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return nil, &shared.RequestError{StatusCode: 400, Err: errors.New("invalid multipart body")}
+		}
+
+		name := part.FormName()
+		if name == "" {
+			continue
+		}
+
+		data, err := io.ReadAll(part)
+		if err != nil {
+			return nil, &shared.RequestError{StatusCode: 400, Err: errors.New("failed to read form part")}
+		}
+
+		switch name {
+		case "image", "mask":
+			payload[name] = base64.StdEncoding.EncodeToString(data)
+		default:
+			payload[name] = string(data)
+		}
+	}
+
+	return payload, nil
+}
+
+func validateAndSetN(payload map[string]any) *shared.RequestError {
+	nValue, ok := payload["n"]
+	if !ok || nValue == nil {
+		return nil
+	}
+
+	var nInt int
+
+	switch v := nValue.(type) {
+	case float64:
+		nInt = int(v)
+	case string:
+		val := strings.TrimSpace(v)
+		if val == "" {
+			return &shared.RequestError{
+				StatusCode: 400,
+				Err:        errors.New("n must be a number"),
+			}
+		}
+		parsed, err := strconv.Atoi(val)
+		if err != nil {
+			return &shared.RequestError{
+				StatusCode: 400,
+				Err:        errors.New("n must be a number"),
+			}
+		}
+		nInt = parsed
+	default:
+		return &shared.RequestError{
+			StatusCode: 400,
+			Err:        errors.New("n must be a number"),
+		}
+	}
+
+	if nInt < 1 || nInt > 10 {
+		return &shared.RequestError{
+			StatusCode: 400,
+			Err:        errors.New("n must be between 1 and 10"),
+		}
+	}
+
+	payload["n"] = nInt
+	return nil
 }

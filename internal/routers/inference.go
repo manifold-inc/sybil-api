@@ -134,13 +134,15 @@ func (ir *InferenceRouter) Inference(cc echo.Context, endpoint string) (string, 
 	}
 
 	logfields := buildLogFields(c, endpoint, nil)
+	contentType := c.Request().Header.Get("Content-Type")
 
 	reqInfo, preErr := ir.ih.Preprocess(inferenceRoute.PreprocessInput{
-		Body:      body,
-		User:      *c.User,
-		Endpoint:  endpoint,
-		RequestID: c.Reqid,
-		LogFields: logfields,
+		Body:        body,
+		User:        *c.User,
+		Endpoint:    endpoint,
+		RequestID:   c.Reqid,
+		ContentType: contentType,
+		LogFields:   logfields,
 	})
 	if preErr != nil {
 		message := "inference error"
