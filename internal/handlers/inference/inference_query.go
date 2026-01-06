@@ -97,9 +97,10 @@ func (im *InferenceHandler) QueryModels(ctx context.Context, req *RequestInfo, s
 		}
 		resInfo := &InferenceOutput{
 			Metadata: &InferenceMetadata{
-				Canceled:  ctx.Err() == context.Canceled,
-				Completed: completed,
-				TotalTime: time.Since(req.StartTime),
+				Canceled:         ctx.Err() == context.Canceled,
+				Completed:        completed,
+				TotalTime:        time.Since(req.StartTime),
+				TimeToFirstToken: time.Since(req.StartTime),
 			},
 			FinalResponse: bodyBytes,
 			Error:         errs,

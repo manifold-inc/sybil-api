@@ -134,6 +134,7 @@ func (im *InferenceHandler) PostProcess(req *RequestInfo, res *InferenceOutput) 
 		ModelID:          req.ModelMetadata.ModelID,
 		Endpoint:         req.Endpoint,
 		TimeToFirstToken: res.Metadata.TimeToFirstToken,
+		TotalTime:        res.Metadata.TotalTime,
 		Usage:            usage,
 		TotalCredits:     totalCredits,
 		CreatedAt:        time.Now(),
