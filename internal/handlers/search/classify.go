@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"math"
 	"net/http"
@@ -49,27 +51,23 @@ type ClassifyResponse struct {
 
 func (s *SearchManager) Classify(cc echo.Context) error {
 	c := cc.(*ctx.Context)
-	start := time.Now()
-	log := c.Log.With("endpoint", "/v1/search/classify", "request_id", c.Reqid)
 
 	body, err := io.ReadAll(c.Request().Body)
 	if err != nil {
-		log.Warnw("request failed", "error", err.Error(), "status", http.StatusBadRequest, "duration_ms", time.Since(start).Milliseconds())
+		c.LogValues.AddError(err)
 		return c.String(http.StatusBadRequest, "failed to read request body")
 	}
 
 	var req classifyRequestBody
 	if err := json.Unmarshal(body, &req); err != nil {
-		log.Warnw("request failed", "error", err.Error(), "status", http.StatusBadRequest, "duration_ms", time.Since(start).Milliseconds())
+		c.LogValues.AddError(err)
 		return c.String(http.StatusBadRequest, "invalid JSON format")
 	}
 
 	if req.Query == "" {
-		log.Warnw("request failed", "error", "query is required", "status", http.StatusBadRequest, "duration_ms", time.Since(start).Milliseconds())
+		c.LogValues.AddError(fmt.Errorf("query is required"))
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "query is required"})
 	}
-
-	log = log.With("query", req.Query)
 
 	ctx, cancel := context.WithTimeout(c.Request().Context(), 10*time.Second)
 	defer cancel()
@@ -82,13 +80,6 @@ func (s *SearchManager) Classify(cc echo.Context) error {
 		Reason:      result.Reason,
 		Confidence:  result.Confidence,
 	}
-
-	log.Infow("request completed",
-		"needs_search", result.NeedsSearch,
-		"confidence", result.Confidence,
-		"reason", result.Reason,
-		"status", http.StatusOK,
-		"duration_ms", time.Since(start).Milliseconds())
 
 	return c.JSON(http.StatusOK, response)
 }
@@ -162,7 +153,7 @@ type embeddingsResponse struct {
 func classifyWithEmbeddings(ctx context.Context, c *ctx.Context, query string, apiKey string) *classifyResult {
 	queryEmbedding, err := getEmbedding(ctx, c, query, apiKey)
 	if err != nil {
-		c.Log.Warnw("failed to get query embedding, defaulting to no search", "error", err.Error(), "query", query)
+		c.LogValues.AddError(errors.Join(errors.New("failed to get query embedding, defaulting to no search"), err))
 		return &classifyResult{
 			NeedsSearch: false,
 			Reason:      "embedding request failed",
@@ -172,7 +163,7 @@ func classifyWithEmbeddings(ctx context.Context, c *ctx.Context, query string, a
 
 	searchEmbeddings, err := getEmbeddings(ctx, c, searchReferenceTexts, apiKey)
 	if err != nil {
-		c.Log.Warnw("failed to get search reference embeddings", "error", err.Error())
+		c.LogValues.AddError(errors.Join(errors.New("failed to get search reference embeddings"), err))
 		return &classifyResult{
 			NeedsSearch: false,
 			Reason:      "reference embedding request failed",
@@ -182,7 +173,7 @@ func classifyWithEmbeddings(ctx context.Context, c *ctx.Context, query string, a
 
 	noSearchEmbeddings, err := getEmbeddings(ctx, c, noSearchReferenceTexts, apiKey)
 	if err != nil {
-		c.Log.Warnw("failed to get no-search reference embeddings", "error", err.Error())
+		c.LogValues.AddError(errors.Join(errors.New("failed to get no-search reference embeddings"), err))
 		return &classifyResult{
 			NeedsSearch: false,
 			Reason:      "reference embedding request failed",
@@ -192,11 +183,6 @@ func classifyWithEmbeddings(ctx context.Context, c *ctx.Context, query string, a
 
 	searchSimilarity := averageCosineSimilarity(queryEmbedding, searchEmbeddings)
 	noSearchSimilarity := averageCosineSimilarity(queryEmbedding, noSearchEmbeddings)
-
-	c.Log.Infow("embedding classification scores",
-		"query", query,
-		"search_similarity", searchSimilarity,
-		"no_search_similarity", noSearchSimilarity)
 
 	diff := math.Abs(searchSimilarity - noSearchSimilarity)
 
@@ -266,7 +252,7 @@ func getEmbeddings(ctx context.Context, c *ctx.Context, texts []string, apiKey s
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		c.Log.Warnw("embeddings API error", "status", resp.StatusCode, "body", string(body))
+		c.LogValues.AddError(fmt.Errorf("embeddings API error: status=%d body=%s", resp.StatusCode, string(body)))
 		return nil, io.EOF
 	}
 

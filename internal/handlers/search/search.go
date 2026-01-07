@@ -6,7 +6,6 @@ import (
 	"io"
 	"net/http"
 	"strings"
-	"time"
 
 	"sybil-api/internal/ctx"
 	"sybil-api/internal/shared"
@@ -26,35 +25,30 @@ type SearchResponse struct {
 
 func (s *SearchManager) Search(cc echo.Context) error {
 	c := cc.(*ctx.Context)
-	start := time.Now()
-	log := c.Log.With("endpoint", "/v1/search", "request_id", c.Reqid)
 
 	body, err := io.ReadAll(c.Request().Body)
 	if err != nil {
-		log.Warnw("request failed", "error", err.Error(), "status", http.StatusBadRequest, "duration_ms", time.Since(start).Milliseconds())
+		c.LogValues.AddError(err)
 		return c.String(http.StatusBadRequest, "failed to read request body")
 	}
 
 	var req searchRequestBody
 	if err := json.Unmarshal(body, &req); err != nil {
-		log.Warnw("request failed", "error", err.Error(), "status", http.StatusBadRequest, "duration_ms", time.Since(start).Milliseconds())
+		c.LogValues.AddError(err)
 		return c.String(http.StatusBadRequest, "invalid JSON format")
 	}
 
 	if req.Query == "" {
-		log.Warnw("request failed", "error", "query is required", "status", http.StatusBadRequest, "duration_ms", time.Since(start).Milliseconds())
+		c.LogValues.AddError(fmt.Errorf("query is required"))
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "query is required"})
 	}
 
-	log = log.With("query", req.Query)
-
-	searchResults, err := QueryGoogleSearch(s.GoogleService, log, s.GoogleSearchEngineID, req.Query, 1)
+	searchResults, err := QueryGoogleSearch(s.GoogleService, c.Log, s.GoogleSearchEngineID, req.Query, 1)
 	if err != nil {
-		log.Errorw("request failed", "error", err.Error(), "status", http.StatusInternalServerError, "duration_ms", time.Since(start).Milliseconds())
+		c.LogValues.AddError(err)
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "search failed"})
 	}
 
-	// Format context for the model from search results
 	context := formatSearchContext(searchResults.Results)
 
 	response := SearchResponse{
@@ -63,16 +57,9 @@ func (s *SearchManager) Search(cc echo.Context) error {
 		Sources: searchResults.Results,
 	}
 
-	log.Infow("request completed",
-		"results_count", len(searchResults.Results),
-		"status", http.StatusOK,
-		"duration_ms", time.Since(start).Milliseconds())
-
 	return c.JSON(http.StatusOK, response)
 }
 
-// formatSearchContext creates a formatted string from search results
-// that can be used as context for an LLM
 func formatSearchContext(results []shared.SearchResults) string {
 	if len(results) == 0 {
 		return ""
