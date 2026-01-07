@@ -38,14 +38,15 @@ func (ir *InferenceRouter) CompletionRequestNewHistory(cc echo.Context) error {
 	if err != nil {
 		c.LogValues.AddError(err)
 		c.LogValues.LogLevel = "ERROR"
-		c.LogValues.InferenceInfo = &ctx.InferenceInfo{
-			ModelName:   output.ModelName,
-			ModelURL:    output.ModelURL,
-			ModelID:     output.ModelID,
-			Stream:      output.Stream,
-			InfMetadata: output.InfMetadata,
-		}
 		return nil
+	}
+
+	c.LogValues.InferenceInfo = &ctx.InferenceInfo{
+		ModelName:   output.ModelName,
+		ModelURL:    output.ModelURL,
+		ModelID:     output.ModelID,
+		Stream:      output.Stream,
+		InfMetadata: output.InfMetadata,
 	}
 
 	_, _ = fmt.Fprintf(c.Response(), "data: %s\n\n", output.HistoryIDJSON)
