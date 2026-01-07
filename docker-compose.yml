@@ -21,7 +21,7 @@ services:
       - cache:/data
 
   traefik:
-    image: traefik:latest
+    image: traefik:v2.3
     ports:
       - 80:80
     volumes:
