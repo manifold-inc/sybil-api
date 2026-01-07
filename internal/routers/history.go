@@ -22,8 +22,6 @@ func (ir *InferenceRouter) CompletionRequestNewHistory(cc echo.Context) error {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "failed to read request body"})
 	}
 
-	logfields := buildLogFields(c, shared.ENDPOINTS.CHAT, nil)
-
 	setupSSEHeaders(c)
 	streamCallback := createStreamCallback(c)
 
@@ -32,7 +30,6 @@ func (ir *InferenceRouter) CompletionRequestNewHistory(cc echo.Context) error {
 		User:         *c.User,
 		RequestID:    c.Reqid,
 		Ctx:          c.Request().Context(),
-		LogFields:    logfields,
 		StreamWriter: streamCallback, // Pass callback for real-time streaming
 	})
 	if err != nil {

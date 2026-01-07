@@ -37,7 +37,6 @@ type NewHistoryInput struct {
 	User         shared.UserMetadata
 	RequestID    string
 	Ctx          context.Context
-	LogFields    map[string]string
 	StreamWriter func(token string) error // Optional callback for real-time streaming
 }
 
@@ -56,8 +55,6 @@ type NewHistoryOutput struct {
 // CompletionRequestNewHistoryLogic initializes a new chat with history for the
 // front end
 func (im *InferenceHandler) CompletionRequestNewHistoryLogic(input *NewHistoryInput) (*NewHistoryOutput, error) {
-	log := logWithFields(im.Log, input.LogFields)
-
 	// Parse request body
 	var payload shared.InferenceBody
 	if err := json.Unmarshal(input.Body, &payload); err != nil {
@@ -90,7 +87,7 @@ func (im *InferenceHandler) CompletionRequestNewHistoryLogic(input *NewHistoryIn
 
 	var settings shared.ChatSettings
 	if err := json.Unmarshal(input.Body, &settings); err != nil {
-		log.Errorw("failed to parse request body for settings", "error", err)
+		return nil, errors.Join(&shared.RequestError{Err: errors.New("failed to parse request body for settings"), StatusCode: 400}, err)
 	}
 	settingsJSON, err := json.Marshal(settings)
 	if err != nil {
