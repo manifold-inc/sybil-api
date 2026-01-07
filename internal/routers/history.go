@@ -27,8 +27,6 @@ func (ir *InferenceRouter) CompletionRequestNewHistory(cc echo.Context) error {
 	setupSSEHeaders(c)
 	streamCallback := createStreamCallback(c)
 
-	// TODO @sean this function needs refactored to return inference metadata in some capacity
-	// so it can be added to logs
 	output, err := ir.ih.CompletionRequestNewHistoryLogic(&inferenceRoute.NewHistoryInput{
 		Body:         body,
 		User:         *c.User,
@@ -40,6 +38,13 @@ func (ir *InferenceRouter) CompletionRequestNewHistory(cc echo.Context) error {
 	if err != nil {
 		c.LogValues.AddError(err)
 		c.LogValues.LogLevel = "ERROR"
+		c.LogValues.InferenceInfo = &ctx.InferenceInfo{
+			ModelName:   output.ModelName,
+			ModelURL:    output.ModelURL,
+			ModelID:     output.ModelID,
+			Stream:      output.Stream,
+			InfMetadata: output.InfMetadata,
+		}
 		return nil
 	}
 

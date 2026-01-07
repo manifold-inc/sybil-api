@@ -47,6 +47,10 @@ type NewHistoryOutput struct {
 	HistoryIDJSON string // SSE event for history ID
 	Stream        bool
 	FinalResponse []byte
+	ModelName     string
+	ModelURL      string
+	ModelID       uint64
+	InfMetadata   *InferenceMetadata
 }
 
 // CompletionRequestNewHistoryLogic initializes a new chat with history for the
@@ -198,6 +202,10 @@ func (im *InferenceHandler) CompletionRequestNewHistoryLogic(input *NewHistoryIn
 		HistoryIDJSON: string(historyIDJSON),
 		Stream:        reqInfo.Stream,
 		FinalResponse: out.FinalResponse,
+		ModelName:     reqInfo.Model,
+		ModelID:       reqInfo.ModelMetadata.ModelID,
+		ModelURL:      reqInfo.ModelMetadata.URL,
+		InfMetadata:   out.Metadata,
 	}, nil
 }
 
