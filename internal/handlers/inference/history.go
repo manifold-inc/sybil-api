@@ -86,7 +86,7 @@ func (im *InferenceHandler) CompletionRequestNewHistoryLogic(input *NewHistoryIn
 
 	var settings shared.ChatSettings
 	if err := json.Unmarshal(input.Body, &settings); err != nil {
-		log.Warnw("Failed to parse request body for settings", "error", err.Error())
+		log.Errorw("failed to parse request body for settings", "error", err)
 	}
 	settingsJSON, err := json.Marshal(settings)
 	if err != nil {
@@ -159,7 +159,6 @@ func (im *InferenceHandler) CompletionRequestNewHistoryLogic(input *NewHistoryIn
 
 	allMessagesJSON, err := json.Marshal(allMessages)
 	if err != nil {
-		log.Errorw("Failed to marshal complete messages", "error", err)
 		return nil, errors.Join(shared.ErrInternalServerError, errors.New("failed to marshal complete message"), err)
 	}
 
@@ -190,7 +189,7 @@ func (im *InferenceHandler) CompletionRequestNewHistoryLogic(input *NewHistoryIn
 	// update user streak asynchronously
 	go func(userID uint64) {
 		if err := im.updateUserStreak(userID); err != nil {
-			im.Log.Errorw("Failed to update user streak", "error", err, "user_id", userID)
+			im.Log.Errorw("failed to update user streak", "error", err, "user_id", userID)
 		}
 	}(input.User.UserID)
 
@@ -254,7 +253,7 @@ func (im *InferenceHandler) UpdateHistoryLogic(input *UpdateHistoryInput) (*Upda
 	// Update user streak asynchronously
 	go func(userID uint64) {
 		if err := im.updateUserStreak(userID); err != nil {
-			im.Log.Errorw("Failed to update user streak", "error", err, "user_id", userID)
+			im.Log.Errorw("failed to update user streak", "error", err, "user_id", userID)
 		}
 	}(input.UserID)
 
