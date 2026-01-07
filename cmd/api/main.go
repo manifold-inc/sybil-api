@@ -33,7 +33,6 @@ func main() {
 	debug := flag.Bool("debug", false, "Debug enabled")
 	targonAPIKey := flag.String("targon-api-key", "", "Targon API Key")
 	targonEndpoint := flag.String("targon-endpoint", "", "Targon endpoint")
-
 	googleSearchEngineID := flag.String("google-search-engine-id", "", "Google search engine id")
 	googleAPIKey := flag.String("google-api-key", "", "Google search api key")
 	googleACURL := flag.String("google-ac-url", "", "Google AC URL")
@@ -136,16 +135,13 @@ func main() {
 	}
 	defer shutdown()
 
-	if *googleSearchEngineID != "" && *googleAPIKey != "" {
-		err := routers.RegisterSearchRoutes(base, routers.SearchRouterConfig{
-			GoogleSearchEngineID: *googleSearchEngineID,
-			GoogleAPIKey:         *googleAPIKey,
-			GoogleACURL:          *googleACURL,
-		})
-		if err != nil {
-			panic(err)
-		}
-		log.Info("Search routes registered")
+	err = routers.RegisterSearchRoutes(base, routers.SearchRouterConfig{
+		GoogleSearchEngineID: *googleSearchEngineID,
+		GoogleAPIKey:         *googleAPIKey,
+		GoogleACURL:          *googleACURL,
+	})
+	if err != nil {
+		panic(err)
 	}
 
 	go func() {

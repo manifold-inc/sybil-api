@@ -50,7 +50,6 @@ func QueryGoogleSearch(googleService *customsearch.Service, Log *zap.SugaredLogg
 
 	res, err := search.Do()
 	if err != nil {
-		Log.Errorf("Google Search Error: %s", err.Error())
 		return nil, err
 	}
 
@@ -69,7 +68,7 @@ func QueryGoogleSearch(googleService *customsearch.Service, Log *zap.SugaredLogg
 		if item.Pagemap != nil {
 			var pagemap map[string]any
 			if err := json.Unmarshal(item.Pagemap, &pagemap); err != nil {
-				Log.Errorf("Failed to unmarshal pagemap: %s", err.Error())
+				Log.Errorw("failed to unmarshal pagemap", "error", err.Error())
 				continue
 			}
 
@@ -154,7 +153,7 @@ func QueryGoogleSearch(googleService *customsearch.Service, Log *zap.SugaredLogg
 	// Create and return SearchResponseBody
 	totalResults, err := strconv.Atoi(res.SearchInformation.TotalResults)
 	if err != nil {
-		Log.Errorf("Error converting total results to int: %s", err.Error())
+		Log.Warnw("error converting total results to int", "error", err.Error())
 		totalResults = 0
 	}
 

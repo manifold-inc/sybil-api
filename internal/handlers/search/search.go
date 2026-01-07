@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
 
 	"sybil-api/internal/ctx"
 	"sybil-api/internal/shared"
@@ -25,26 +26,31 @@ type SearchResponse struct {
 
 func (s *SearchManager) Search(cc echo.Context) error {
 	c := cc.(*ctx.Context)
+	start := time.Now()
+	log := c.Log.With("endpoint", "/v1/search", "request_id", c.Reqid)
 
 	body, err := io.ReadAll(c.Request().Body)
 	if err != nil {
-		c.Log.Warnw("Failed to read request body", "error", err.Error())
+		log.Warnw("request failed", "error", err.Error(), "status", http.StatusBadRequest, "duration_ms", time.Since(start).Milliseconds())
 		return c.String(http.StatusBadRequest, "failed to read request body")
 	}
 
 	var req searchRequestBody
 	if err := json.Unmarshal(body, &req); err != nil {
-		c.Log.Warnw("Failed to parse request body", "error", err.Error())
+		log.Warnw("request failed", "error", err.Error(), "status", http.StatusBadRequest, "duration_ms", time.Since(start).Milliseconds())
 		return c.String(http.StatusBadRequest, "invalid JSON format")
 	}
 
 	if req.Query == "" {
+		log.Warnw("request failed", "error", "query is required", "status", http.StatusBadRequest, "duration_ms", time.Since(start).Milliseconds())
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "query is required"})
 	}
 
-	searchResults, err := QueryGoogleSearch(s.GoogleService, c.Log, s.GoogleSearchEngineID, req.Query, 1)
+	log = log.With("query", req.Query)
+
+	searchResults, err := QueryGoogleSearch(s.GoogleService, log, s.GoogleSearchEngineID, req.Query, 1)
 	if err != nil {
-		c.Log.Errorw("Google search failed", "error", err.Error())
+		log.Errorw("request failed", "error", err.Error(), "status", http.StatusInternalServerError, "duration_ms", time.Since(start).Milliseconds())
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "search failed"})
 	}
 
@@ -56,6 +62,11 @@ func (s *SearchManager) Search(cc echo.Context) error {
 		Context: context,
 		Sources: searchResults.Results,
 	}
+
+	log.Infow("request completed",
+		"results_count", len(searchResults.Results),
+		"status", http.StatusOK,
+		"duration_ms", time.Since(start).Milliseconds())
 
 	return c.JSON(http.StatusOK, response)
 }
