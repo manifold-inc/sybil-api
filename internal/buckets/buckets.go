@@ -112,25 +112,8 @@ func (b *bucket) AddRequest(c *UsageCache, pqi *shared.ProcessedQueryInfo, reque
 		})
 	}
 	b.totalCredits += pqi.TotalCredits
-	modelLabel := fmt.Sprintf("%d-%s", pqi.ModelID, pqi.Model)
-	metrics.InflightRequests.WithLabelValues(fmt.Sprintf("%d", pqi.UserID)).Set(float64(b.inflight))
-	metrics.RequestDuration.WithLabelValues(modelLabel, pqi.Endpoint).Observe(pqi.TotalTime.Seconds())
-	if pqi.TimeToFirstToken != time.Duration(0) {
-		metrics.TimeToFirstToken.WithLabelValues(modelLabel, pqi.Endpoint).Observe(pqi.TimeToFirstToken.Seconds())
-	}
-	creditsUsed := shared.CalculateCredits(pqi.Usage, pqi.Cost.InputCredits, pqi.Cost.OutputCredits, pqi.Cost.CanceledCredits)
-	metrics.CreditUsage.WithLabelValues(modelLabel, pqi.Endpoint, "total").Add(float64(creditsUsed))
-	metrics.RequestCount.WithLabelValues(modelLabel, pqi.Endpoint, "success").Inc()
-	if pqi.Usage != nil {
-		metrics.TokensPerSecond.WithLabelValues(modelLabel, pqi.Endpoint).Observe(float64(pqi.Usage.CompletionTokens) / pqi.TotalTime.Seconds())
-		metrics.PromptTokens.WithLabelValues(modelLabel, pqi.Endpoint).Add(float64(pqi.Usage.PromptTokens))
-		metrics.CompletionTokens.WithLabelValues(modelLabel, pqi.Endpoint).Add(float64(pqi.Usage.CompletionTokens))
-		metrics.TotalTokens.WithLabelValues(modelLabel, pqi.Endpoint).Add(float64(pqi.Usage.TotalTokens))
-		if pqi.Usage.IsCanceled {
-			metrics.CanceledRequests.WithLabelValues(modelLabel, fmt.Sprintf("%d", pqi.UserID)).Inc()
-		}
-	}
 
+	metrics.InflightRequests.WithLabelValues(fmt.Sprintf("%d", pqi.UserID)).Set(float64(b.inflight))
 	// Case no inflight requests so we should flush right away
 	if b.inflight >= 1 && b.timer != nil {
 		return
@@ -175,6 +158,7 @@ func (c *UsageCache) AddRequestToBucket(userID uint64, pqi *shared.ProcessedQuer
 	defer c.mu.Unlock()
 	bucket := c.GetBucket(userID)
 	bucket.AddRequest(c, pqi, id)
+	bucket.decInflight()
 }
 
 func (c *UsageCache) Flush(userID uint64) time.Duration {

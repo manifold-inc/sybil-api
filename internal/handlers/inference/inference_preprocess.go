@@ -1,6 +1,7 @@
 package inference
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"time"
@@ -13,35 +14,42 @@ type PreprocessInput struct {
 	User      shared.UserMetadata
 	Endpoint  string
 	RequestID string
-	LogFields map[string]string
 }
 
-func (im *InferenceHandler) Preprocess(input PreprocessInput) (*shared.RequestInfo, *shared.RequestError) {
-	startTime := time.Now()
+type RequestInfo struct {
+	Body          []byte
+	UserID        uint64
+	Credits       uint64
+	ID            string
+	StartTime     time.Time
+	Endpoint      string
+	Model         string
+	Stream        bool
+	URL           string
+	ModelMetadata *InferenceService
+}
 
-	newlog := logWithFields(im.Log, input.LogFields)
+func (im *InferenceHandler) Preprocess(ctx context.Context, input PreprocessInput) (*RequestInfo, error) {
+	startTime := time.Now()
 
 	// Unmarshal to generic map to set defaults
 	var payload map[string]any
 	err := json.Unmarshal(input.Body, &payload)
 	if err != nil {
-		newlog.Warnw("failed json unmarshal to payload map", "error", err.Error())
-		return nil, &shared.RequestError{StatusCode: 400, Err: errors.New("malformed request")}
+		return nil, errors.Join(shared.ErrBadRequest, err)
 	}
 
 	// validate models and set defaults
 	model, ok := payload["model"]
 	if !ok {
-		newlog.Infow("missing model parameter", "error", "model is required")
 		return nil, &shared.RequestError{StatusCode: 400, Err: errors.New("model is required")}
 	}
 
 	modelName := model.(string)
+	stream := false
 
-	newlog = newlog.With("model", modelName, "endpoint", input.Endpoint)
-
-	if input.Endpoint == shared.ENDPOINTS.EMBEDDING {
-
+	switch input.Endpoint {
+	case shared.ENDPOINTS.EMBEDDING:
 		inputField, ok := payload["input"]
 		if !ok {
 			return nil, &shared.RequestError{
@@ -71,34 +79,8 @@ func (im *InferenceHandler) Preprocess(input PreprocessInput) (*shared.RequestIn
 				Err:        errors.New("input must be string or array of strings"),
 			}
 		}
+	case shared.ENDPOINTS.RESPONSES:
 
-		if (input.User.Credits == 0 && input.User.PlanRequests == 0) && !input.User.AllowOverspend {
-			newlog.Infow("No credits available", "user_id", input.User.UserID)
-			return nil, &shared.RequestError{
-				StatusCode: 402,
-				Err:        errors.New("insufficient credits"),
-			}
-		}
-
-		body, err := json.Marshal(payload)
-		if err != nil {
-			newlog.Errorw("Failed to marshal request body", "error", err.Error())
-			return nil, &shared.RequestError{StatusCode: 500, Err: errors.New("internal server error")}
-		}
-
-		return &shared.RequestInfo{
-			Body:      body,
-			UserID:    input.User.UserID,
-			Credits:   input.User.Credits,
-			ID:        input.RequestID,
-			StartTime: startTime,
-			Endpoint:  input.Endpoint,
-			Model:     modelName,
-			Stream:    false,
-		}, nil
-	}
-
-	if input.Endpoint == shared.ENDPOINTS.RESPONSES {
 		inputField, ok := payload["input"]
 		if !ok {
 			return nil, &shared.RequestError{
@@ -121,28 +103,23 @@ func (im *InferenceHandler) Preprocess(input PreprocessInput) (*shared.RequestIn
 				Err:        errors.New("input array cannot be empty"),
 			}
 		}
+
+		// Fallthrough to set stream settings
+		fallthrough
+	case shared.ENDPOINTS.CHAT, shared.ENDPOINTS.COMPLETION:
+		// Set stream default if not specified
+		if val, ok := payload["stream"]; !ok || val == nil {
+			payload["stream"] = shared.DefaultStreamOption
+		}
+		stream = payload["stream"].(bool)
 	}
 
 	if (input.User.Credits == 0 && input.User.PlanRequests == 0) && !input.User.AllowOverspend {
-		newlog.Warnw("Insufficient credits or requests",
-			"credits", input.User.Credits,
-			"plan_requests", input.User.PlanRequests,
-			"allow_overspend", input.User.AllowOverspend)
 		return nil, &shared.RequestError{
 			StatusCode: 402,
 			Err:        errors.New("insufficient requests or credits"),
 		}
 	}
-
-	// Set stream default if not specified
-	if val, ok := payload["stream"]; !ok || val == nil {
-		payload["stream"] = shared.DefaultStreamOption
-	}
-
-	stream := payload["stream"].(bool)
-
-	// Add stream to logger context
-	newlog = newlog.With("stream", stream)
 
 	// If streaming is enabled (either by default or explicitly), include usage data
 	if stream {
@@ -151,34 +128,30 @@ func (im *InferenceHandler) Preprocess(input PreprocessInput) (*shared.RequestIn
 		}
 	}
 
-	// Log user id 3's request parameters
-	if input.User.UserID == 3 {
-		newlog.Infow("User 3 request payload",
-			"model", modelName,
-			"stream", stream,
-			"max_tokens", payload["max_tokens"],
-			"temperature", payload["temperature"],
-			"top_p", payload["top_p"],
-			"frequency_penalty", payload["frequency_penalty"],
-			"presence_penalty", payload["presence_penalty"])
-	}
-
 	// repackage body
 	body, err := json.Marshal(payload)
 	if err != nil {
-		newlog.Errorw("Failed to marshal request body", "error", err.Error())
-		return nil, &shared.RequestError{StatusCode: 500, Err: errors.New("internal server error")}
+		return nil, errors.Join(&shared.RequestError{StatusCode: 500, Err: errors.New("internal server error")}, err)
 	}
 
-	reqInfo := &shared.RequestInfo{
-		Body:      body,
-		UserID:    input.User.UserID,
-		Credits:   input.User.Credits,
-		ID:        input.RequestID,
-		StartTime: startTime,
-		Endpoint:  input.Endpoint,
-		Model:     modelName,
-		Stream:    stream,
+	modelMetadata, err := im.DiscoverModels(ctx, input.User.UserID, modelName)
+	if err != nil {
+		return nil, errors.Join(&shared.RequestError{
+			StatusCode: 404,
+			Err:        errors.New("model not found"),
+		}, err)
+	}
+
+	reqInfo := &RequestInfo{
+		Body:          body,
+		UserID:        input.User.UserID,
+		Credits:       input.User.Credits,
+		ID:            input.RequestID,
+		StartTime:     startTime,
+		Endpoint:      input.Endpoint,
+		Model:         modelName,
+		Stream:        stream,
+		ModelMetadata: modelMetadata,
 	}
 
 	return reqInfo, nil

@@ -6,183 +6,159 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"maps"
-	"sync"
 	"time"
+
+	"sybil-api/internal/metrics"
 
 	"sybil-api/internal/shared"
 )
 
 type InferenceInput struct {
-	Req          *shared.RequestInfo
+	Req          *RequestInfo
 	User         shared.UserMetadata
 	Ctx          context.Context
 	LogFields    map[string]string
 	StreamWriter func(token string) error // callback for real-time streaming
 }
 
-type InferenceOutput struct {
-	Stream           bool
-	FinalResponse    []byte
-	ModelID          string
-	TimeToFirstToken time.Duration
-	TotalTime        time.Duration
-	Usage            *shared.Usage
+type InferenceMetadata struct {
 	Completed        bool
 	Canceled         bool
+	TotalTime        time.Duration
+	TimeToFirstToken time.Duration
 }
 
-func (im *InferenceHandler) DoInference(input InferenceInput) (*InferenceOutput, *shared.RequestError) {
+type InferenceOutput struct {
+	FinalResponse []byte
+	Metadata      *InferenceMetadata
+
+	// This is for mid-stream errors, if any
+	Error error
+}
+
+// DoInference only returns errors from bad inputs and when output would not exist.
+// A partial stream for instance would not return an error directly but be baked inside of
+// InferenceOutput. The difference is that if we get an error back from DoInference,
+// we can assume no http status code was sent and the router should send them accordingly
+func (im *InferenceHandler) DoInference(input InferenceInput) (*InferenceOutput, error) {
 	if input.Req == nil {
 		return nil, &shared.RequestError{
-			StatusCode: 500,
+			StatusCode: 400,
 			Err:        errors.New("request info missing"),
 		}
 	}
 	reqInfo := input.Req
 
+	// Make sure to remove in flights if they arent going to be picked up by
+	// AddRequestToBucket
 	im.usageCache.AddInFlightToBucket(reqInfo.UserID)
-	mu := sync.Mutex{}
-	mu.Lock()
-	defer func() {
-		im.usageCache.RemoveInFlightFromBucket(reqInfo.UserID)
-		mu.Unlock()
-	}()
 
-	queryLogFields := map[string]string{}
-	if input.LogFields != nil {
-		maps.Copy(queryLogFields, input.LogFields)
-	}
-	queryLogFields["model"] = reqInfo.Model
-	queryLogFields["stream"] = fmt.Sprintf("%t", reqInfo.Stream)
-
-	queryInput := QueryInput{
-		Ctx:          input.Ctx,
-		Req:          reqInfo,
-		LogFields:    queryLogFields,
-		StreamWriter: input.StreamWriter, // Pass the callback through
-	}
-
-	resInfo, qerr := im.QueryModels(queryInput)
+	resInfo, qerr := im.QueryModels(input.Ctx, reqInfo, input.StreamWriter)
 	if qerr != nil {
+		im.usageCache.RemoveInFlightFromBucket(reqInfo.UserID)
 		return nil, qerr
 	}
 
-	output := &InferenceOutput{
-		Stream:           reqInfo.Stream,
-		ModelID:          fmt.Sprintf("%d", resInfo.ModelID),
-		TimeToFirstToken: resInfo.TimeToFirstToken,
-		TotalTime:        resInfo.TotalTime,
-		Usage:            resInfo.Usage,
-		Completed:        resInfo.Completed,
-		Canceled:         resInfo.Canceled,
-		FinalResponse:    []byte(resInfo.ResponseContent),
-	}
+	go im.PostProcess(reqInfo, resInfo)
+	return resInfo, nil
+}
 
-	log := im.Log.With(
-		"endpoint", reqInfo.Endpoint,
-		"user_id", input.User.UserID,
-		"request_id", reqInfo.ID,
-	)
-
-	if resInfo.ResponseContent == "" || !resInfo.Completed {
-		log.Errorw("No response or incomplete response from model",
-			"response_content_length", len(resInfo.ResponseContent),
-			"completed", resInfo.Completed,
-			"canceled", resInfo.Canceled,
-			"ttft", resInfo.TimeToFirstToken,
-			"total_time", resInfo.TotalTime)
-		return nil, &shared.RequestError{
-			StatusCode: 500,
-			Err:        errors.New("no response from model"),
-		}
-	}
-
-	go func() {
-		switch true {
-		case !resInfo.Completed:
+// PostProcess deducts user credits and saves metadata to the db / metrics ( for now )
+func (im *InferenceHandler) PostProcess(req *RequestInfo, res *InferenceOutput) {
+	var usage *shared.Usage
+	switch req.Stream {
+	case true:
+		var chunks []map[string]any
+		err := json.Unmarshal(res.FinalResponse, &chunks)
+		if err != nil {
+			im.Log.Warnw(
+				"Failed to unmarshal streaming ResponseContent as JSON array of chunks",
+				"error",
+				err,
+				"raw_response_content",
+				string(res.FinalResponse),
+			)
 			break
-		case reqInfo.Stream:
-			var chunks []map[string]any
-			err := json.Unmarshal([]byte(resInfo.ResponseContent), &chunks)
-			if err != nil {
-				log.Errorw(
-					"Failed to unmarshal streaming ResponseContent as JSON array of chunks",
-					"error",
-					err,
-					"raw_response_content",
-					resInfo.ResponseContent,
-				)
-				break
-			}
-			for i := len(chunks) - 1; i >= 0; i-- {
-				usageData, usageFieldExists := chunks[i]["usage"]
-				if usageFieldExists && usageData != nil {
-					if extractedUsage, extractErr := extractUsageData(chunks[i], reqInfo.Endpoint); extractErr == nil {
-						resInfo.Usage = extractedUsage
-						break
-					}
-					log.Warnw(
-						"Failed to extract usage data from a response chunk that had a non-null usage field",
-						"chunk_index",
-						i,
-					)
-					break
-				}
-			}
-		case !reqInfo.Stream:
-			var singleResponse map[string]any
-			err := json.Unmarshal([]byte(resInfo.ResponseContent), &singleResponse)
-			if err != nil {
-				log.Errorw(
-					"Failed to unmarshal non-streaming ResponseContent as single JSON object",
-					"error",
-					err,
-					"raw_response_content",
-					resInfo.ResponseContent,
-				)
-				break
-			}
-			usageData, usageFieldExists := singleResponse["usage"]
+		}
+		for i := len(chunks) - 1; i >= 0; i-- {
+			usageData, usageFieldExists := chunks[i]["usage"]
 			if usageFieldExists && usageData != nil {
-				if extractedUsage, extractErr := extractUsageData(singleResponse, reqInfo.Endpoint); extractErr == nil {
-					resInfo.Usage = extractedUsage
+				if extractedUsage, extractErr := extractUsageData(chunks[i], req.Endpoint); extractErr == nil {
+					usage = extractedUsage
 					break
 				}
-				log.Warnw(
-					"Failed to extract usage data from single response object that had a non-null usage field",
+				im.Log.Warnw(
+					"Failed to extract usage data from a response chunk that had a non-null usage field",
+					"chunk_index",
+					i,
 				)
+				break
 			}
-		default:
+		}
+	case false:
+		var singleResponse map[string]any
+		err := json.Unmarshal(res.FinalResponse, &singleResponse)
+		if err != nil {
+			im.Log.Warnw(
+				"Failed to unmarshal non-streaming ResponseContent as single JSON object",
+				"error",
+				err,
+				"raw_response_content",
+				string(res.FinalResponse),
+			)
 			break
 		}
-
-		if resInfo.Usage == nil {
-			resInfo.Usage = &shared.Usage{IsCanceled: resInfo.Canceled}
+		usageData, usageFieldExists := singleResponse["usage"]
+		if usageFieldExists && usageData != nil {
+			if extractedUsage, extractErr := extractUsageData(singleResponse, req.Endpoint); extractErr == nil {
+				usage = extractedUsage
+				break
+			}
+			im.Log.Warnw(
+				"Failed to extract usage data from single response object that had a non-null usage field",
+			)
 		}
+	default:
+		break
+	}
 
-		totalCredits := shared.CalculateCredits(resInfo.Usage, resInfo.Cost.InputCredits, resInfo.Cost.OutputCredits, resInfo.Cost.CanceledCredits)
+	if usage == nil {
+		usage = &shared.Usage{}
+	}
+	// Always set canceled state from metadata
+	usage.IsCanceled = res.Metadata.Canceled
 
-		pqi := &shared.ProcessedQueryInfo{
-			UserID:           reqInfo.UserID,
-			Model:            reqInfo.Model,
-			ModelID:          resInfo.ModelID,
-			Endpoint:         reqInfo.Endpoint,
-			TotalTime:        resInfo.TotalTime,
-			TimeToFirstToken: resInfo.TimeToFirstToken,
-			Usage:            resInfo.Usage,
-			Cost:             resInfo.Cost,
-			TotalCredits:     totalCredits,
-			ResponseContent:  resInfo.ResponseContent,
-			RequestContent:   reqInfo.Body,
-			CreatedAt:        time.Now(),
-			ID:               reqInfo.ID,
+	totalCredits := shared.CalculateCredits(usage, req.ModelMetadata.ICPT, req.ModelMetadata.OCPT, req.ModelMetadata.CRC)
+
+	pqi := &shared.ProcessedQueryInfo{
+		UserID:           req.UserID,
+		Model:            req.Model,
+		ModelID:          req.ModelMetadata.ModelID,
+		Endpoint:         req.Endpoint,
+		TimeToFirstToken: res.Metadata.TimeToFirstToken,
+		TotalTime:        res.Metadata.TotalTime,
+		Usage:            usage,
+		TotalCredits:     totalCredits,
+		CreatedAt:        time.Now(),
+	}
+
+	im.usageCache.AddRequestToBucket(req.UserID, pqi, req.ID)
+
+	modelLabel := fmt.Sprintf("%d-%s", req.ModelMetadata.ModelID, req.Model)
+
+	metrics.RequestDuration.WithLabelValues(modelLabel, req.Endpoint).Observe(res.Metadata.TotalTime.Seconds())
+	if res.Metadata.TimeToFirstToken != time.Duration(0) {
+		metrics.TimeToFirstToken.WithLabelValues(modelLabel, req.Endpoint).Observe(res.Metadata.TimeToFirstToken.Seconds())
+	}
+	metrics.CreditUsage.WithLabelValues(modelLabel, req.Endpoint, "total").Add(float64(totalCredits))
+	metrics.RequestCount.WithLabelValues(modelLabel, req.Endpoint, "success").Inc()
+	if usage != nil {
+		metrics.TokensPerSecond.WithLabelValues(modelLabel, req.Endpoint).Observe(float64(usage.CompletionTokens) / res.Metadata.TotalTime.Seconds())
+		metrics.PromptTokens.WithLabelValues(modelLabel, req.Endpoint).Add(float64(usage.PromptTokens))
+		metrics.CompletionTokens.WithLabelValues(modelLabel, req.Endpoint).Add(float64(usage.CompletionTokens))
+		metrics.TotalTokens.WithLabelValues(modelLabel, req.Endpoint).Add(float64(usage.TotalTokens))
+		if usage.IsCanceled {
+			metrics.CanceledRequests.WithLabelValues(modelLabel, fmt.Sprintf("%d", req.UserID)).Inc()
 		}
-
-		mu.Lock()
-		im.usageCache.AddRequestToBucket(reqInfo.UserID, pqi, reqInfo.ID)
-		mu.Unlock()
-	}()
-
-	return output, nil
+	}
 }

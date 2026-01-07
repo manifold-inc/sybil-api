@@ -7,23 +7,37 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+
 	"sybil-api/internal/shared"
 )
 
-func (t *TargonHandler) DeleteModelLogic(input DeleteModelInput) DeleteModelOutput {
+// DeleteModelInput contains all data needed for DeleteModel business logic
+type DeleteModelInput struct {
+	Ctx      context.Context
+	UserID   uint64
+	ModelUID string
+}
 
+type DeleteModelOutput struct {
+	ModelID    uint64
+	TargonUID  string
+	ModelNames []string
+	Message    string
+}
+
+func (t *TargonHandler) DeleteModelLogic(input DeleteModelInput) (*DeleteModelOutput, error) {
 	checkQuery := `SELECT id FROM model WHERE targon_uid = ?`
 	var modelID uint64
 	err := t.RDB.QueryRowContext(input.Ctx, checkQuery, input.ModelUID).Scan(&modelID)
 	if err != nil {
-		t.Log.Errorw("Failed to find model", "error", err, "targon_uid", input.ModelUID)
-		return DeleteModelOutput{Error: errors.New("Model not found"), StatusCode: 404}
+		return nil, errors.Join(errors.New("failed to find model"), err, shared.ErrNotFound)
 	}
 
 	// cache clear
 	rows, err := t.RDB.Query("SELECT model_name FROM model_registry WHERE model_id = ?", modelID)
 	if err != nil {
-		t.Log.Errorw("Failed to get model names", "error", err, "model_id", modelID)
+		// can safely fail, only used for clearing redis cache
+		t.Log.Warnw("failed to get model names", "error", err, "model_id", modelID)
 	}
 
 	var modelNames []string
@@ -48,15 +62,13 @@ func (t *TargonHandler) DeleteModelLogic(input DeleteModelInput) DeleteModelOutp
 	_, err = t.WDB.ExecContext(input.Ctx,
 		"UPDATE model SET enabled = false WHERE targon_uid = ?", input.ModelUID)
 	if err != nil {
-		t.Log.Errorw("Failed to soft delete model", "error", err, "targon_uid", input.ModelUID)
-		return DeleteModelOutput{Error: errors.New("Failed to soft delete model"), StatusCode: 500}
+		return nil, errors.Join(fmt.Errorf("failed to soft delete model %s", input.ModelUID), err, shared.ErrInternalServerError)
 	}
 
 	_, err = t.WDB.ExecContext(input.Ctx,
 		"DELETE FROM model_registry WHERE model_id = ?", modelID)
 	if err != nil {
-		t.Log.Errorw("Failed to delete from model registry", "error", err, "model_id", modelID)
-		return DeleteModelOutput{Error: errors.New("Failed to delete model registry"), StatusCode: 500}
+		return nil, errors.Join(fmt.Errorf("failed to delete from model registry: %d", modelID), err, shared.ErrInternalServerError)
 	}
 
 	// cache clear
@@ -70,25 +82,17 @@ func (t *TargonHandler) DeleteModelLogic(input DeleteModelInput) DeleteModelOutp
 
 		if len(cacheKeys) > 0 {
 			if err := t.RedisClient.Del(ctx, cacheKeys...).Err(); err != nil {
-				t.Log.Warnw("Failed to clear cache for deleted model", "error", err, "model_id", mid)
-			} else {
-				t.Log.Infow("Cleared cache for deleted model", "model_id", mid, "aliases_cleared", len(cacheKeys))
+				t.Log.Warnw("failed to clear cache for deleted model", "error", err, "model_id", mid)
 			}
 		}
 	}(modelNames, modelID)
 
-	t.Log.Infow("Successfully deleted model",
-		"targon_uid", input.ModelUID,
-		"model_id", modelID,
-		"model_names", modelNames)
-
-	return DeleteModelOutput{
+	return &DeleteModelOutput{
 		ModelID:    modelID,
 		TargonUID:  input.ModelUID,
 		ModelNames: modelNames,
 		Message:    "Model deleted successfully",
-		StatusCode: 200,
-	}
+	}, nil
 }
 
 // clean up orphaned Targon service if anything goes wrong
@@ -99,35 +103,23 @@ func (t *TargonHandler) cleanupTargonService(targonUID string) error {
 	url := fmt.Sprintf("%s/v1/inference/%s", t.TargonEndpoint, targonUID)
 	httpReq, err := http.NewRequestWithContext(ctx, "DELETE", url, nil)
 	if err != nil {
-		t.Log.Errorw("Failed to create cleanup http request",
-			"error", err.Error(),
-			"targon_uid", targonUID)
-		return err
+		return errors.Join(fmt.Errorf("failed to create cleanup http request: %s", targonUID), err)
 	}
 	httpReq.Header.Set("Authorization", fmt.Sprintf("Bearer %s", t.TargonAPIKey))
 
 	res, err := t.HTTPClient.Do(httpReq)
 	if err != nil {
-		t.Log.Errorw("Failed to cleanup orphaned Targon service",
-			"error", err.Error(),
-			"targon_uid", targonUID)
-		return err
+		return errors.Join(fmt.Errorf("failed to clean up orphaned targon service: %s", targonUID), err)
 	}
 	defer func() {
 		if closeErr := res.Body.Close(); closeErr != nil {
-			t.Log.Warnw("Failed to close response body during cleanup", "error", closeErr)
+			t.Log.Warnw("failed to close response body during cleanup", "error", closeErr)
 		}
 	}()
 
 	if res.StatusCode != http.StatusOK && res.StatusCode != http.StatusNoContent {
 		resBody, _ := io.ReadAll(res.Body)
-		t.Log.Errorw("Targon cleanup returned error",
-			"status", res.StatusCode,
-			"body", string(resBody),
-			"targon_uid", targonUID)
-	} else {
-		t.Log.Infow("Successfully cleaned up orphaned Targon service",
-			"targon_uid", targonUID)
+		return fmt.Errorf("targon returned error: [%d: %s]", res.StatusCode, string(resBody))
 	}
 
 	return nil
