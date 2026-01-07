@@ -144,6 +144,7 @@ func (im *InferenceHandler) PostProcess(req *RequestInfo, res *InferenceOutput) 
 
 	modelLabel := fmt.Sprintf("%d-%s", req.ModelMetadata.ModelID, req.Model)
 
+	metrics.RequestDuration.WithLabelValues(modelLabel, req.Endpoint).Observe(res.Metadata.TotalTime.Seconds())
 	if res.Metadata.TimeToFirstToken != time.Duration(0) {
 		metrics.TimeToFirstToken.WithLabelValues(modelLabel, req.Endpoint).Observe(res.Metadata.TimeToFirstToken.Seconds())
 	}
