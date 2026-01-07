@@ -68,7 +68,5 @@ func extractUsageData(response map[string]any, endpoint string) (*shared.Usage, 
 		PromptTokens:     promptTokens,
 		CompletionTokens: completionTokens,
 		TotalTokens:      totalTokens,
-		IsCanceled:       false,
 	}, nil
 }
-
