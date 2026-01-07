@@ -22,25 +22,28 @@ func (ir *InferenceRouter) CompletionRequestNewHistory(cc echo.Context) error {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "failed to read request body"})
 	}
 
-	logfields := buildLogFields(c, shared.ENDPOINTS.CHAT, nil)
-
 	setupSSEHeaders(c)
 	streamCallback := createStreamCallback(c)
 
-	// TODO @sean this function needs refactored to return inference metadata in some capacity
-	// so it can be added to logs
 	output, err := ir.ih.CompletionRequestNewHistoryLogic(&inferenceRoute.NewHistoryInput{
 		Body:         body,
 		User:         *c.User,
 		RequestID:    c.Reqid,
 		Ctx:          c.Request().Context(),
-		LogFields:    logfields,
 		StreamWriter: streamCallback, // Pass callback for real-time streaming
 	})
 	if err != nil {
 		c.LogValues.AddError(err)
 		c.LogValues.LogLevel = "ERROR"
 		return nil
+	}
+
+	c.LogValues.InferenceInfo = &ctx.InferenceInfo{
+		ModelName:   output.ModelName,
+		ModelURL:    output.ModelURL,
+		ModelID:     output.ModelID,
+		Stream:      output.Stream,
+		InfMetadata: output.InfMetadata,
 	}
 
 	_, _ = fmt.Fprintf(c.Response(), "data: %s\n\n", output.HistoryIDJSON)

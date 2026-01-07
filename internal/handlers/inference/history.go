@@ -37,7 +37,6 @@ type NewHistoryInput struct {
 	User         shared.UserMetadata
 	RequestID    string
 	Ctx          context.Context
-	LogFields    map[string]string
 	StreamWriter func(token string) error // Optional callback for real-time streaming
 }
 
@@ -47,20 +46,15 @@ type NewHistoryOutput struct {
 	HistoryIDJSON string // SSE event for history ID
 	Stream        bool
 	FinalResponse []byte
+	ModelName     string
+	ModelURL      string
+	ModelID       uint64
+	InfMetadata   *InferenceMetadata
 }
 
 // CompletionRequestNewHistoryLogic initializes a new chat with history for the
 // front end
-// TODO @sean should we create history *after* a request finishes to
-// ensure consistency? in the case a inference request fails at some point
-// before it finishes, we cant save it in the db anyways, and the ux will be
-// subpar. The FE can already handle streaming in text before routing to a
-// history id, so it may make more sense to just completely delay saving
-// to the history table till its all done. This way we could create the
-// history entry with all its data instead of a create + update from a new request.
 func (im *InferenceHandler) CompletionRequestNewHistoryLogic(input *NewHistoryInput) (*NewHistoryOutput, error) {
-	log := logWithFields(im.Log, input.LogFields)
-
 	// Parse request body
 	var payload shared.InferenceBody
 	if err := json.Unmarshal(input.Body, &payload); err != nil {
@@ -91,43 +85,13 @@ func (im *InferenceHandler) CompletionRequestNewHistoryLogic(input *NewHistoryIn
 		}
 	}
 
-	// Marshal messages for DB insert
-	messagesJSON, err := json.Marshal(messages)
-	if err != nil {
-		return nil, errors.Join(&shared.RequestError{Err: errors.New("failed to prepare history"), StatusCode: 500}, err)
-	}
-
-	// overlap in types with InferenceBody and ChatSettings, should clean up once InferenceBody is better defined
 	var settings shared.ChatSettings
 	if err := json.Unmarshal(input.Body, &settings); err != nil {
-		log.Warnw("Failed to parse request body for settings", "error", err.Error())
+		return nil, errors.Join(&shared.RequestError{Err: errors.New("failed to parse request body for settings"), StatusCode: 400}, err)
 	}
 	settingsJSON, err := json.Marshal(settings)
 	if err != nil {
 		return nil, errors.Join(shared.ErrInternalServerError, errors.New("failed to marshal settings"), err)
-	}
-
-	insertQuery := `
-		INSERT INTO chat_history (
-			user_id,
-			history_id,
-			messages,
-			title,
-			icon,
-			settings
-		) VALUES (?, ?, ?, ?, ?, ?)
-	`
-
-	_, err = im.WDB.Exec(insertQuery,
-		input.User.UserID,
-		historyID,
-		string(messagesJSON),
-		title,
-		nil, // icon
-		string(settingsJSON),
-	)
-	if err != nil {
-		return nil, errors.Join(shared.ErrInternalServerError, errors.New("failed to insert history into db"), err)
 	}
 
 	// Prepare history ID SSE event
@@ -146,7 +110,6 @@ func (im *InferenceHandler) CompletionRequestNewHistoryLogic(input *NewHistoryIn
 	})
 
 	if preErr != nil {
-		// TODO delete this chat from db since it failed to initalize
 		// We can safely bubble up pre error since its already a request error
 		return nil, errors.Join(preErr, errors.New("failed preprocessing"))
 	}
@@ -160,7 +123,6 @@ func (im *InferenceHandler) CompletionRequestNewHistoryLogic(input *NewHistoryIn
 	})
 
 	if reqErr != nil {
-		// TODO delete this chat from db since it failed to initalize
 		return nil, errors.Join(reqErr, errors.New("inference error"))
 	}
 
@@ -198,33 +160,49 @@ func (im *InferenceHandler) CompletionRequestNewHistoryLogic(input *NewHistoryIn
 
 	allMessagesJSON, err := json.Marshal(allMessages)
 	if err != nil {
-		log.Errorw("Failed to marshal complete messages", "error", err)
 		return nil, errors.Join(shared.ErrInternalServerError, errors.New("failed to marshal complete message"), err)
 	}
 
-	go func(userID uint64, historyID string, messagesJSON []byte) {
-		updateQuery := `
-			UPDATE chat_history 
-			SET messages = ?, updated_at = NOW()
-			WHERE history_id = ?
-		`
+	// insert history into database after response is complete
+	insertQuery := `
+		INSERT INTO chat_history (
+			user_id,
+			history_id,
+			messages,
+			title,
+			icon,
+			settings
+		) VALUES (?, ?, ?, ?, ?, ?)
+	`
 
-		_, err := im.WDB.Exec(updateQuery, string(messagesJSON), historyID)
-		if err != nil {
-			im.Log.Errorw("Failed to update history in database", "error", err, "history_id", historyID)
-			return
-		}
+	_, err = im.WDB.Exec(insertQuery,
+		input.User.UserID,
+		historyID,
+		string(allMessagesJSON),
+		title,
+		nil, // icon
+		string(settingsJSON),
+	)
+	if err != nil {
+		return nil, errors.Join(shared.ErrInternalServerError, errors.New("failed to insert history into db"), err)
+	}
 
+	// update user streak asynchronously
+	go func(userID uint64) {
 		if err := im.updateUserStreak(userID); err != nil {
-			im.Log.Errorw("Failed to update user streak", "error", err, "user_id", userID)
+			im.Log.Errorw("failed to update user streak", "error", err, "user_id", userID)
 		}
-	}(input.User.UserID, historyID, allMessagesJSON)
+	}(input.User.UserID)
 
 	return &NewHistoryOutput{
 		HistoryID:     historyID,
 		HistoryIDJSON: string(historyIDJSON),
 		Stream:        reqInfo.Stream,
 		FinalResponse: out.FinalResponse,
+		ModelName:     reqInfo.Model,
+		ModelID:       reqInfo.ModelMetadata.ModelID,
+		ModelURL:      reqInfo.ModelMetadata.URL,
+		InfMetadata:   out.Metadata,
 	}, nil
 }
 
@@ -280,7 +258,7 @@ func (im *InferenceHandler) UpdateHistoryLogic(input *UpdateHistoryInput) (*Upda
 	// Update user streak asynchronously
 	go func(userID uint64) {
 		if err := im.updateUserStreak(userID); err != nil {
-			im.Log.Errorw("Failed to update user streak", "error", err, "user_id", userID)
+			im.Log.Errorw("failed to update user streak", "error", err, "user_id", userID)
 		}
 	}(input.UserID)
 
