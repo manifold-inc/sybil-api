@@ -45,8 +45,6 @@ type classifyRequestBody struct {
 type ClassifyResponse struct {
 	NeedsSearch bool   `json:"needs_search"`
 	Query       string `json:"query"`
-	Reason      string `json:"reason,omitempty"`
-	Confidence  string `json:"confidence,omitempty"`
 }
 
 func (s *SearchManager) Classify(cc echo.Context) error {
@@ -77,8 +75,6 @@ func (s *SearchManager) Classify(cc echo.Context) error {
 	response := ClassifyResponse{
 		NeedsSearch: result.NeedsSearch,
 		Query:       req.Query,
-		Reason:      result.Reason,
-		Confidence:  result.Confidence,
 	}
 
 	return c.JSON(http.StatusOK, response)
@@ -86,8 +82,6 @@ func (s *SearchManager) Classify(cc echo.Context) error {
 
 type classifyResult struct {
 	NeedsSearch bool
-	Reason      string
-	Confidence  string
 }
 
 func classifyQuery(ctx context.Context, c *ctx.Context, query string, apiKey string) *classifyResult {
@@ -111,8 +105,6 @@ func classifyWithHeuristics(query string) *classifyResult {
 		if strings.Contains(q, trigger) {
 			return &classifyResult{
 				NeedsSearch: true,
-				Reason:      "matched search trigger pattern",
-				Confidence:  "high",
 			}
 		}
 	}
@@ -129,8 +121,6 @@ func classifyWithHeuristics(query string) *classifyResult {
 		if strings.HasPrefix(q, prefix) {
 			return &classifyResult{
 				NeedsSearch: false,
-				Reason:      "matched no-search prefix pattern",
-				Confidence:  "high",
 			}
 		}
 	}
@@ -156,8 +146,6 @@ func classifyWithEmbeddings(ctx context.Context, c *ctx.Context, query string, a
 		c.LogValues.AddError(errors.Join(errors.New("failed to get query embedding, defaulting to no search"), err))
 		return &classifyResult{
 			NeedsSearch: false,
-			Reason:      "embedding request failed",
-			Confidence:  "low",
 		}
 	}
 
@@ -166,8 +154,6 @@ func classifyWithEmbeddings(ctx context.Context, c *ctx.Context, query string, a
 		c.LogValues.AddError(errors.Join(errors.New("failed to get search reference embeddings"), err))
 		return &classifyResult{
 			NeedsSearch: false,
-			Reason:      "reference embedding request failed",
-			Confidence:  "low",
 		}
 	}
 
@@ -176,41 +162,16 @@ func classifyWithEmbeddings(ctx context.Context, c *ctx.Context, query string, a
 		c.LogValues.AddError(errors.Join(errors.New("failed to get no-search reference embeddings"), err))
 		return &classifyResult{
 			NeedsSearch: false,
-			Reason:      "reference embedding request failed",
-			Confidence:  "low",
 		}
 	}
 
 	searchSimilarity := averageCosineSimilarity(queryEmbedding, searchEmbeddings)
 	noSearchSimilarity := averageCosineSimilarity(queryEmbedding, noSearchEmbeddings)
-
 	diff := math.Abs(searchSimilarity - noSearchSimilarity)
-
-	var confidence string
-	switch {
-	case diff > 0.1:
-		confidence = "high"
-	case diff > 0.05:
-		confidence = "medium"
-	default:
-		confidence = "low"
-	}
-
-	needsSearch := searchSimilarity > noSearchSimilarity && diff > 0.05
-
-	reason := "embedding similarity classification"
-	if needsSearch {
-		reason = "query is semantically similar to search-requiring queries"
-	} else if diff <= 0.05 {
-		reason = "ambiguous query, defaulting to no search"
-	} else {
-		reason = "query is semantically similar to knowledge-based queries"
-	}
+	needsSearch := searchSimilarity > noSearchSimilarity && diff > 0.02
 
 	return &classifyResult{
 		NeedsSearch: needsSearch,
-		Reason:      reason,
-		Confidence:  confidence,
 	}
 }
 
