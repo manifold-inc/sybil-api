@@ -123,8 +123,10 @@ func (im *InferenceHandler) PostProcess(req *RequestInfo, res *InferenceOutput) 
 	}
 
 	if usage == nil {
-		usage = &shared.Usage{IsCanceled: res.Metadata.Canceled}
+		usage = &shared.Usage{}
 	}
+	// Always set canceled state from metadata
+	usage.IsCanceled = res.Metadata.Canceled
 
 	totalCredits := shared.CalculateCredits(usage, req.ModelMetadata.ICPT, req.ModelMetadata.OCPT, req.ModelMetadata.CRC)
 
