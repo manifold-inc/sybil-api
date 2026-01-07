@@ -60,7 +60,7 @@ func NewTrackMiddleware(log *zap.SugaredLogger) echo.MiddlewareFunc {
 			for _, err := range errs {
 				var e *shared.MetricsError
 				if ok := errors.As(err, &e); ok {
-					metrics.ErrorCount.WithLabelValues(modelName, cc.LogValues.Path, fmt.Sprintf("%d", cc.LogValues.UserID), e.Code)
+					metrics.ErrorCount.WithLabelValues(modelName, cc.LogValues.Path, fmt.Sprintf("%d", cc.LogValues.UserID), e.Code).Inc()
 				}
 			}
 			return err

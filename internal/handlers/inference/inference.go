@@ -123,8 +123,10 @@ func (im *InferenceHandler) PostProcess(req *RequestInfo, res *InferenceOutput) 
 	}
 
 	if usage == nil {
-		usage = &shared.Usage{IsCanceled: res.Metadata.Canceled}
+		usage = &shared.Usage{}
 	}
+	// Always set canceled state from metadata
+	usage.IsCanceled = res.Metadata.Canceled
 
 	totalCredits := shared.CalculateCredits(usage, req.ModelMetadata.ICPT, req.ModelMetadata.OCPT, req.ModelMetadata.CRC)
 
@@ -144,6 +146,7 @@ func (im *InferenceHandler) PostProcess(req *RequestInfo, res *InferenceOutput) 
 
 	modelLabel := fmt.Sprintf("%d-%s", req.ModelMetadata.ModelID, req.Model)
 
+	metrics.RequestDuration.WithLabelValues(modelLabel, req.Endpoint).Observe(res.Metadata.TotalTime.Seconds())
 	if res.Metadata.TimeToFirstToken != time.Duration(0) {
 		metrics.TimeToFirstToken.WithLabelValues(modelLabel, req.Endpoint).Observe(res.Metadata.TimeToFirstToken.Seconds())
 	}
