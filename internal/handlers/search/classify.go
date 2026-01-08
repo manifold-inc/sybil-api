@@ -168,7 +168,7 @@ func classifyWithEmbeddings(ctx context.Context, c *ctx.Context, query string, a
 	searchSimilarity := averageCosineSimilarity(queryEmbedding, searchEmbeddings)
 	noSearchSimilarity := averageCosineSimilarity(queryEmbedding, noSearchEmbeddings)
 	diff := math.Abs(searchSimilarity - noSearchSimilarity)
-	needsSearch := searchSimilarity > noSearchSimilarity && diff > 0.02
+	needsSearch := searchSimilarity > noSearchSimilarity && diff > 0.01
 
 	return &classifyResult{
 		NeedsSearch: needsSearch,
