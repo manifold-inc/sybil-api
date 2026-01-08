@@ -11,11 +11,6 @@ services:
     build:
       context: .
     restart: always
-    ports:
-      - "80:80"
-    depends_on:
-      cache:
-        condition: service_healthy
 
   cache:
     image: redis/redis-stack-server:latest
