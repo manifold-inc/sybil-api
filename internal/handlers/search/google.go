@@ -16,6 +16,8 @@ import (
 	"google.golang.org/api/option"
 )
 
+const NumSearchResults = 5
+
 type SearchManager struct {
 	GoogleSearchEngineID string
 	GoogleAPIKey         string
@@ -38,14 +40,14 @@ func NewSearchManager(gseid, gapikey, gacurl string) (*SearchManager, error) {
 }
 
 func QueryGoogleSearch(googleService *customsearch.Service, Log *zap.SugaredLogger, googleSearchEngineID string, query string, page int, searchType ...string) (*shared.SearchResponseBody, error) {
-	search := googleService.Cse.List().Q(query).Cx(googleSearchEngineID).Num(3)
+	search := googleService.Cse.List().Q(query).Cx(googleSearchEngineID).Num(NumSearchResults)
 
 	if len(searchType) > 0 && searchType[0] == "image" {
 		search = search.SearchType("image")
 	}
 
 	if page > 1 {
-		search = search.Start(int64(page-1)*3 + 1)
+		search = search.Start(int64(page-1)*NumSearchResults + 1)
 	}
 
 	res, err := search.Do()

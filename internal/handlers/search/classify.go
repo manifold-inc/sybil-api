@@ -28,6 +28,11 @@ var searchReferenceTexts = []string{
 	"current stock price and market data",
 	"what time is it now",
 	"recent updates and breaking news",
+	"sports scores and game results today",
+	"flight status and arrival time",
+	"where can I buy this product near me",
+	"restaurant hours and reviews",
+	"upcoming events and concert dates",
 }
 
 var noSearchReferenceTexts = []string{
@@ -36,6 +41,11 @@ var noSearchReferenceTexts = []string{
 	"creative writing and brainstorming",
 	"how to do something tutorial",
 	"translate text between languages",
+	"summarize this text for me",
+	"solve this math equation",
+	"debug and fix this error",
+	"generate ideas for a project",
+	"reformat this data as json",
 }
 
 type classifyRequestBody struct {
@@ -99,7 +109,7 @@ func classifyWithHeuristics(query string) *classifyResult {
 		"stock price", "bitcoin price", "crypto price",
 		"latest news", "breaking news", "recent news",
 		"current score", "game score",
-		"what time is it", "current time",
+		"what time is it", "current time", "price of",
 	}
 	for _, trigger := range searchTriggers {
 		if strings.Contains(q, trigger) {
@@ -168,7 +178,7 @@ func classifyWithEmbeddings(ctx context.Context, c *ctx.Context, query string, a
 	searchSimilarity := averageCosineSimilarity(queryEmbedding, searchEmbeddings)
 	noSearchSimilarity := averageCosineSimilarity(queryEmbedding, noSearchEmbeddings)
 	diff := math.Abs(searchSimilarity - noSearchSimilarity)
-	needsSearch := searchSimilarity > noSearchSimilarity && diff > 0.01
+	needsSearch := searchSimilarity > noSearchSimilarity && diff > 0.015
 
 	return &classifyResult{
 		NeedsSearch: needsSearch,
