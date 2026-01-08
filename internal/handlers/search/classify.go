@@ -108,7 +108,7 @@ func classifyWithHeuristics(query string) *classifyResult {
 		"weather today", "weather in", "weather for",
 		"stock price", "bitcoin price", "crypto price",
 		"latest news", "breaking news", "recent news",
-		"current score", "game score",
+		"current score", "game score", "search for",
 		"what time is it", "current time", "price of",
 	}
 	for _, trigger := range searchTriggers {
@@ -178,7 +178,7 @@ func classifyWithEmbeddings(ctx context.Context, c *ctx.Context, query string, a
 	searchSimilarity := averageCosineSimilarity(queryEmbedding, searchEmbeddings)
 	noSearchSimilarity := averageCosineSimilarity(queryEmbedding, noSearchEmbeddings)
 	diff := math.Abs(searchSimilarity - noSearchSimilarity)
-	needsSearch := searchSimilarity > noSearchSimilarity && diff > 0.015
+	needsSearch := searchSimilarity > noSearchSimilarity && diff > 0.025
 
 	return &classifyResult{
 		NeedsSearch: needsSearch,
