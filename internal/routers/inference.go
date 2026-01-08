@@ -136,6 +136,14 @@ func (ir *InferenceRouter) Inference(cc echo.Context, endpoint string) (*inferen
 		})
 	}
 
+	// Track all metadata for request
+	c.LogValues.InferenceInfo = &ctx.InferenceInfo{
+		ModelName: reqInfo.Model,
+		ModelURL:  reqInfo.ModelMetadata.URL,
+		ModelID:   reqInfo.ModelMetadata.ModelID,
+		Stream:    reqInfo.Stream,
+	}
+
 	var out *inference.InferenceOutput
 	var reqErr error
 	switch reqInfo.Stream {
@@ -169,13 +177,7 @@ func (ir *InferenceRouter) Inference(cc echo.Context, endpoint string) (*inferen
 	}
 
 	// Track all metadata for request
-	c.LogValues.InferenceInfo = &ctx.InferenceInfo{
-		InfMetadata: out.Metadata,
-		ModelName:   reqInfo.Model,
-		ModelURL:    reqInfo.ModelMetadata.URL,
-		ModelID:     reqInfo.ModelMetadata.ModelID,
-		Stream:      reqInfo.Stream,
-	}
+	c.LogValues.InferenceInfo.InfMetadata = out.Metadata
 	c.LogValues.AddError(out.Error)
 	if out.Error != nil {
 		c.LogValues.LogLevel = "ERROR"
