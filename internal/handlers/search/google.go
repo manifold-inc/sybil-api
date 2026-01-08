@@ -60,6 +60,7 @@ func QueryGoogleSearch(googleService *customsearch.Service, Log *zap.SugaredLogg
 		link := item.Link
 		imgSource := link // Default to link if no specific image source found
 		source := ""
+		website := ""
 		resolution := ""
 		metadata := ""
 		publishedDate := ""
@@ -111,6 +112,9 @@ func QueryGoogleSearch(googleService *customsearch.Service, Log *zap.SugaredLogg
 					if desc := shared.GetString(metatag, "og:description"); desc != "" {
 						metadata = desc
 					}
+					if siteName := shared.GetString(metatag, "og:site_name"); siteName != "" {
+						website = siteName
+					}
 				}
 			}
 		}
@@ -119,6 +123,9 @@ func QueryGoogleSearch(googleService *customsearch.Service, Log *zap.SugaredLogg
 		if link != "" {
 			if parsed, err := url.Parse(link); err == nil {
 				source = parsed.Hostname()
+				if website == "" {
+					website = source
+				}
 				parsedURL := strings.Split(source, ".")
 				results[i] = shared.SearchResults{
 					Title:         &title,
@@ -127,6 +134,7 @@ func QueryGoogleSearch(googleService *customsearch.Service, Log *zap.SugaredLogg
 					ImgSource:     &imgSource,
 					ParsedURL:     &parsedURL,
 					Source:        &source,
+					Website:       &website,
 					Resolution:    &resolution,
 					Metadata:      &metadata,
 					PublishedDate: &publishedDate,
@@ -144,6 +152,7 @@ func QueryGoogleSearch(googleService *customsearch.Service, Log *zap.SugaredLogg
 			ImgSource:     &imgSource,
 			ParsedURL:     &emptyParsedURL,
 			Source:        &source,
+			Website:       &website,
 			Resolution:    &resolution,
 			Metadata:      &metadata,
 			PublishedDate: &publishedDate,

@@ -17,6 +17,7 @@ type MessageSource struct {
 	URL       string `json:"url,omitempty"`
 	Content   string `json:"content,omitempty"`
 	Thumbnail string `json:"thumbnail,omitempty"`
+	Website   string `json:"website,omitempty"`
 }
 
 type Response struct {
@@ -65,6 +66,7 @@ type ChatSettings struct {
 type SearchResults struct {
 	URL           *string   `json:"url,omitempty"`
 	Source        *string   `json:"source,omitempty"`
+	Website       *string   `json:"website,omitempty"`
 	Resolution    *string   `json:"resolution,omitempty"`
 	ImgSource     *string   `json:"img_src,omitempty"`
 	Title         *string   `json:"title,omitempty"`
