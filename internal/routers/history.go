@@ -83,19 +83,14 @@ func (ir *InferenceRouter) ChatHistory(cc echo.Context) error {
 		ModelName:   output.ModelName,
 		ModelURL:    output.ModelURL,
 		ModelID:     output.ModelID,
-		Stream:      output.Stream,
+		Stream:      true,
 		InfMetadata: output.InfMetadata,
 	}
 	c.LogValues.HistoryID = output.HistoryID
 
 	historyEvent := map[string]any{
-		"type":        "history_id",
-		"id":          output.HistoryID,
-		"is_new":      output.IsNew,
-		"search_used": output.SearchUsed,
-	}
-	if output.SearchUsed && len(output.Sources) > 0 {
-		historyEvent["sources"] = output.Sources
+		"type": "history_id",
+		"id":   output.HistoryID,
 	}
 	historyJSON, _ := json.Marshal(historyEvent)
 	_, _ = fmt.Fprintf(c.Response(), "data: %s\n\n", historyJSON)

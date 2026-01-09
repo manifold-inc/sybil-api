@@ -68,15 +68,11 @@ type ChatInput struct {
 
 type ChatOutput struct {
 	HistoryID     string
-	IsNew         bool
-	Stream        bool
 	FinalResponse []byte
 	ModelName     string
 	ModelURL      string
 	ModelID       uint64
 	InfMetadata   *InferenceMetadata
-	SearchUsed    bool
-	Sources       []shared.SearchResults
 }
 
 func (im *InferenceHandler) Chat(input *ChatInput) (*ChatOutput, error) {
@@ -213,10 +209,7 @@ func (im *InferenceHandler) Chat(input *ChatInput) (*ChatOutput, error) {
 
 	if out == nil {
 		return &ChatOutput{
-			HistoryID:  historyID,
-			IsNew:      isNew,
-			SearchUsed: searchUsed,
-			Sources:    searchSources,
+			HistoryID: historyID,
 		}, nil
 	}
 
@@ -319,15 +312,11 @@ func (im *InferenceHandler) Chat(input *ChatInput) (*ChatOutput, error) {
 
 	return &ChatOutput{
 		HistoryID:     historyID,
-		IsNew:         isNew,
-		Stream:        reqInfo.Stream,
 		FinalResponse: out.FinalResponse,
 		ModelName:     reqInfo.Model,
 		ModelURL:      reqInfo.ModelMetadata.URL,
 		ModelID:       reqInfo.ModelMetadata.ModelID,
 		InfMetadata:   out.Metadata,
-		SearchUsed:    searchUsed,
-		Sources:       searchSources,
 	}, nil
 }
 
