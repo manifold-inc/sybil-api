@@ -18,14 +18,36 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
+	"google.golang.org/api/customsearch/v1"
+	"google.golang.org/api/option"
 )
 
 type InferenceRouter struct {
 	ih *inference.InferenceHandler
 }
 
-func RegisterInferenceRoutes(e *echo.Group, wdb *sql.DB, rdb *sql.DB, redisClient *redis.Client, log *zap.SugaredLogger, debug bool) (func(), error) {
-	inferenceManager, inferenceErr := inference.NewInferenceHandler(wdb, rdb, redisClient, log, debug)
+type InferenceRouterConfig struct {
+	GoogleSearchEngineID string
+	GoogleAPIKey         string
+}
+
+func RegisterInferenceRoutes(e *echo.Group, wdb *sql.DB, rdb *sql.DB, redisClient *redis.Client, log *zap.SugaredLogger, debug bool, config *InferenceRouterConfig) (func(), error) {
+	var searchConfig *inference.SearchConfig
+	if config != nil && config.GoogleAPIKey != "" && config.GoogleSearchEngineID != "" {
+		googleService, err := customsearch.NewService(context.Background(), option.WithAPIKey(config.GoogleAPIKey))
+		if err == nil {
+			searchConfig = &inference.SearchConfig{
+				ClassifyQuery: func(ctx context.Context, query string, apiKey string) bool {
+					return classifyQueryForChat(ctx, query, apiKey)
+				},
+				DoSearch: func(query string) (*shared.SearchResponseBody, error) {
+					return queryGoogleSearchForChat(googleService, log, config.GoogleSearchEngineID, query)
+				},
+			}
+		}
+	}
+
+	inferenceManager, inferenceErr := inference.NewInferenceHandler(wdb, rdb, redisClient, log, debug, searchConfig)
 	if inferenceErr != nil {
 		return nil, inferenceErr
 	}
@@ -46,8 +68,7 @@ func RegisterInferenceRoutes(e *echo.Group, wdb *sql.DB, rdb *sql.DB, redisClien
 	requireUser.POST("/completions", inferenceRouter.CompletionRequest)
 	requireUser.POST("/embeddings", inferenceRouter.EmbeddingRequest)
 	requireUser.POST("/responses", inferenceRouter.ResponsesRequest)
-	requireUser.POST("/chat/history/new", inferenceRouter.CompletionRequestNewHistory)
-	requireUser.PATCH("/chat/history/:history_id", inferenceRouter.UpdateHistory)
+	requireUser.POST("/chat/history", inferenceRouter.ChatHistory)
 	return inferenceManager.ShutDown, nil
 }
 
@@ -238,4 +259,12 @@ func (ir *InferenceRouter) NonStreamInference(c *ctx.Context, reqInfo *inference
 		return out, err
 	}
 	return out, reqErr
+}
+
+func classifyQueryForChat(ctx context.Context, query string, apiKey string) bool {
+	return inference.ClassifyQuery(ctx, query, apiKey)
+}
+
+func queryGoogleSearchForChat(googleService *customsearch.Service, log *zap.SugaredLogger, googleSearchEngineID string, query string) (*shared.SearchResponseBody, error) {
+	return inference.QueryGoogleSearch(googleService, log, googleSearchEngineID, query)
 }

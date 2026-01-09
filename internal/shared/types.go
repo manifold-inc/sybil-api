@@ -61,6 +61,7 @@ type ChatSettings struct {
 	Seed              int      `json:"seed"`
 	Stream            bool     `json:"stream"`
 	Logprobs          bool     `json:"logprobs"`
+	Search            string   `json:"search"`
 }
 
 type SearchResults struct {

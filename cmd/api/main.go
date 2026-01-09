@@ -35,7 +35,6 @@ func main() {
 	targonEndpoint := flag.String("targon-endpoint", "", "Targon endpoint")
 	googleSearchEngineID := flag.String("google-search-engine-id", "", "Google search engine id")
 	googleAPIKey := flag.String("google-api-key", "", "Google search api key")
-	googleACURL := flag.String("google-ac-url", "", "Google AC URL")
 
 	err := eflag.SetFlagsFromEnvironment()
 	if err != nil {
@@ -129,20 +128,14 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	shutdown, err := routers.RegisterInferenceRoutes(base, writeDB, readDB, redisClient, log, *debug)
-	if err != nil {
-		panic(err)
-	}
-	defer shutdown()
-
-	err = routers.RegisterSearchRoutes(base, routers.SearchRouterConfig{
+	shutdown, err := routers.RegisterInferenceRoutes(base, writeDB, readDB, redisClient, log, *debug, &routers.InferenceRouterConfig{
 		GoogleSearchEngineID: *googleSearchEngineID,
 		GoogleAPIKey:         *googleAPIKey,
-		GoogleACURL:          *googleACURL,
 	})
 	if err != nil {
 		panic(err)
 	}
+	defer shutdown()
 
 	go func() {
 		if err := e.Start(":80"); err != nil && err != http.ErrServerClosed {
