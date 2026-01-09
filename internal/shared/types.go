@@ -9,15 +9,7 @@ type ChatMessage struct {
 	Content string          `json:"content"`
 	Name    string          `json:"name,omitempty"`
 	Model   string          `json:"model,omitempty"`
-	Sources []MessageSource `json:"sources,omitempty"`
-}
-
-type MessageSource struct {
-	Title     string `json:"title,omitempty"`
-	URL       string `json:"url,omitempty"`
-	Content   string `json:"content,omitempty"`
-	Thumbnail string `json:"thumbnail,omitempty"`
-	Website   string `json:"website,omitempty"`
+	Sources []SearchResults `json:"sources,omitempty"`
 }
 
 type Response struct {

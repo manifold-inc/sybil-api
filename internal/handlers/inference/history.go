@@ -235,7 +235,7 @@ func (im *InferenceHandler) Chat(input *ChatInput) (*ChatOutput, error) {
 			Content: assistantContent,
 		}
 		if searchUsed && len(searchSources) > 0 {
-			assistantMsg.Sources = convertSearchResultsToMessageSources(searchSources)
+			assistantMsg.Sources = searchSources
 		}
 		allMessages = append(allMessages, assistantMsg)
 	}
@@ -329,30 +329,6 @@ func (im *InferenceHandler) Chat(input *ChatInput) (*ChatOutput, error) {
 		SearchUsed:    searchUsed,
 		Sources:       searchSources,
 	}, nil
-}
-
-func convertSearchResultsToMessageSources(results []shared.SearchResults) []shared.MessageSource {
-	sources := make([]shared.MessageSource, 0, len(results))
-	for _, r := range results {
-		source := shared.MessageSource{}
-		if r.Title != nil {
-			source.Title = *r.Title
-		}
-		if r.URL != nil {
-			source.URL = *r.URL
-		}
-		if r.Content != nil {
-			source.Content = *r.Content
-		}
-		if r.Thumbnail != nil {
-			source.Thumbnail = *r.Thumbnail
-		}
-		if r.Website != nil {
-			source.Website = *r.Website
-		}
-		sources = append(sources, source)
-	}
-	return sources
 }
 
 func formatSearchContext(results []shared.SearchResults) string {
