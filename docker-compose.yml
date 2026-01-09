@@ -11,7 +11,6 @@ services:
     build:
       context: .
     restart: always
-
   cache:
     image: redis/redis-stack-server:latest
     healthcheck:

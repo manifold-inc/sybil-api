@@ -5,9 +5,11 @@ import (
 )
 
 type ChatMessage struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
-	Name    string `json:"name,omitempty"`
+	Role    string          `json:"role"`
+	Content string          `json:"content"`
+	Name    string          `json:"name,omitempty"`
+	Model   string          `json:"model,omitempty"`
+	Sources []SearchResults `json:"sources,omitempty"`
 }
 
 type Response struct {
@@ -51,11 +53,13 @@ type ChatSettings struct {
 	Seed              int      `json:"seed"`
 	Stream            bool     `json:"stream"`
 	Logprobs          bool     `json:"logprobs"`
+	Search            string   `json:"search"`
 }
 
 type SearchResults struct {
 	URL           *string   `json:"url,omitempty"`
 	Source        *string   `json:"source,omitempty"`
+	Website       *string   `json:"website,omitempty"`
 	Resolution    *string   `json:"resolution,omitempty"`
 	ImgSource     *string   `json:"img_src,omitempty"`
 	Title         *string   `json:"title,omitempty"`

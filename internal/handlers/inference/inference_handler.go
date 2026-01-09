@@ -11,10 +11,20 @@ import (
 	"time"
 
 	"sybil-api/internal/buckets"
+	"sybil-api/internal/shared"
 
 	"github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
 )
+
+type ClassifyFunc func(ctx context.Context, query string, apiKey string) bool
+
+type SearchFunc func(query string) (*shared.SearchResponseBody, error)
+
+type SearchConfig struct {
+	ClassifyQuery ClassifyFunc
+	DoSearch      SearchFunc
+}
 
 type InferenceHandler struct {
 	WDB          *sql.DB
@@ -25,9 +35,10 @@ type InferenceHandler struct {
 	httpClients  map[string]*http.Client
 	clientsMutex sync.RWMutex
 	usageCache   *buckets.UsageCache
+	SearchConfig *SearchConfig
 }
 
-func NewInferenceHandler(wdb *sql.DB, rdb *sql.DB, redisClient *redis.Client, log *zap.SugaredLogger, debug bool) (*InferenceHandler, error) {
+func NewInferenceHandler(wdb *sql.DB, rdb *sql.DB, redisClient *redis.Client, log *zap.SugaredLogger, debug bool, searchConfig *SearchConfig) (*InferenceHandler, error) {
 	// check if the databases are connected
 	err := wdb.Ping()
 	if err != nil {
@@ -47,13 +58,14 @@ func NewInferenceHandler(wdb *sql.DB, rdb *sql.DB, redisClient *redis.Client, lo
 	usageCache := buckets.NewUsageCache(log, wdb)
 
 	return &InferenceHandler{
-		WDB:         wdb,
-		RDB:         rdb,
-		RedisClient: redisClient,
-		Log:         log,
-		Debug:       debug,
-		httpClients: make(map[string]*http.Client),
-		usageCache:  usageCache,
+		WDB:          wdb,
+		RDB:          rdb,
+		RedisClient:  redisClient,
+		Log:          log,
+		Debug:        debug,
+		httpClients:  make(map[string]*http.Client),
+		usageCache:   usageCache,
+		SearchConfig: searchConfig,
 	}, nil
 }
 
